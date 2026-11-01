@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/EffectSystem.Samples/EffectSystem.Samples.fsproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/EffectSystem.Plus/EffectSystem.Plus.fsproj" />
+    <Project Path="src/EffectSystem/EffectSystem.fsproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/EffectSystem.Tests/EffectSystem.Tests.fsproj" />
+  </Folder>
+</Solution>

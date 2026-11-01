@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <GenerateProgramFile>false</GenerateProgramFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Tests.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Expecto" Version="11.1.1" />
+    <PackageReference Include="FSharpPlus" Version="1.9.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\EffectSystem\EffectSystem.fsproj" />
+    <ProjectReference Include="..\..\src\EffectSystem.Plus\EffectSystem.Plus.fsproj" />
+    <ProjectReference Include="..\..\samples\EffectSystem.Samples\EffectSystem.Samples.fsproj" />
+  </ItemGroup>
+
+</Project>
