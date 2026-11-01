@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <FsDocsAllowExecutableProject>true</FsDocsAllowExecutableProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Effects.fs" />
+    <Compile Include="KokaStyle.fs" />
+    <Compile Include="EffektStyle.fs" />
+    <Compile Include="UnisonStyle.fs" />
+    <Compile Include="OCamlStyle.fs" />
+    <Compile Include="PolysemyStyle.fs" />
+    <Compile Include="PureScriptStyle.fs" />
+    <Compile Include="OCamlManual.fs" />
+    <Compile Include="AsyncOneShot.fs" />
+    <Compile Include="StaticRow.fs" />
+    <Compile Include="Advanced.fs" />
+    <Compile Include="Bench.fs" />
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\EffectSystem\EffectSystem.fsproj" />
+    <ProjectReference Include="..\..\src\EffectSystem.Plus\EffectSystem.Plus.fsproj" />
+  </ItemGroup>
+
+</Project>
