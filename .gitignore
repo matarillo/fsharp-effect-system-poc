@@ -1,0 +1,24 @@
+# ビルドの生成物
+bin/
+obj/
+
+# fsdocs の生成物 (scripts/build-docs.fsx が作る)
+/output/
+/tmp/
+/.fsdocs/
+
+# テストと計測の結果
+TestResults/
+BenchmarkDotNet.Artifacts/
+
+# エディターと IDE
+.vs/
+.vscode/
+.idea/
+.ionide/
+*.user
+*.suo
+
+# OS
+.DS_Store
+Thumbs.db

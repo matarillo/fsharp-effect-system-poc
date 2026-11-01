@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- Debug でも .tail 呼び出しを出す。ただしエンジンのスタック安全性はこれに依存させない。 -->
+    <Tailcalls>true</Tailcalls>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- XML コメントの誤り (不正な XML、存在しない引数名など) をビルドで検出する。 -->
+    <OtherFlags>$(OtherFlags) --warnon:3390</OtherFlags>
+  </PropertyGroup>
+</Project>
