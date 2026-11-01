@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="690" viewBox="0 0 1400 690" role="img" aria-label="図1 エフェクトの仕組み。計算は操作で止まり、計算の残りが継続としてハンドラーへ渡る。継続を呼ばなければ例外、末尾で1回なら依存性の注入、保存して後で呼べばジェネレーターや非同期、複数回呼べば非決定計算になる。ハンドラーを重ねると操作が消え、空になった計算だけが実行できる。" font-family="'Yu Gothic UI','Yu Gothic','Meiryo','Hiragino Sans','Noto Sans JP',sans-serif">
+  <title>図1 エフェクトの仕組み</title>
+  <defs>
+    <marker id="arrBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2F5FB3"/></marker>
+    <marker id="arrAmber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#B7791F"/></marker>
+    <marker id="arrGray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#555"/></marker>
+  </defs>
+  <rect x="0" y="0" width="1400" height="690" fill="#FFFFFF"/>
+
+  <text x="30" y="40" font-size="24" font-weight="bold" fill="#222">図1 エフェクトの仕組み — 止まった計算の残りがハンドラーへ渡り、その使い方が機能を決める</text>
+  <text x="30" y="66" font-size="15" fill="#555">言語によらないモデル。普通の関数呼び出しと違うのは、呼ばれた側が「呼び出し元の残り」を値として受け取ることである。</text>
+
+  <!-- 左: ハンドラーが囲む計算 -->
+  <rect x="30" y="92" width="530" height="348" rx="10" fill="#EEF4FD" stroke="#2F5FB3" stroke-width="1.6"/>
+  <text x="48" y="118" font-size="15" font-weight="bold" fill="#1F4690">ハンドラー H の範囲</text>
+
+  <rect x="52" y="130" width="486" height="290" rx="8" fill="#FFFFFF" stroke="#888888"/>
+  <text x="68" y="157" font-size="15" font-weight="bold" fill="#222">計算</text>
+  <text x="108" y="157" font-size="13" fill="#555">意味を知らずに要求するだけ</text>
+
+  <g font-family="Consolas,'Cascadia Mono',monospace" font-size="17">
+    <text x="78" y="196" fill="#777">print("Start")</text>
+    <rect x="66" y="212" width="458" height="38" rx="5" fill="#DCE8FA"/>
+    <text x="78" y="237" fill="#1F4690" font-weight="bold">v = ask()</text>
+    <rect x="66" y="262" width="458" height="146" rx="6" fill="#FDEBC8" stroke="#B7791F"/>
+    <text x="78" y="312" fill="#5F3F0C">emit(v)</text>
+    <text x="78" y="356" fill="#5F3F0C">return v</text>
+  </g>
+  <text x="516" y="196" font-size="12" fill="#777" text-anchor="end">実行済み</text>
+  <text x="492" y="236" font-size="13" fill="#1F4690" text-anchor="end">ここで止まる</text>
+  <circle cx="510" cy="231" r="7" fill="#2F5FB3"/>
+  <text x="510" y="316" font-size="17" font-weight="bold" fill="#8A5A12" text-anchor="end">継続 k</text>
+  <text x="510" y="340" font-size="13" fill="#8A5A12" text-anchor="end">計算の残り</text>
+  <text x="510" y="358" font-size="13" fill="#8A5A12" text-anchor="end">ハンドラーの範囲まで</text>
+
+  <rect x="30" y="456" width="530" height="40" rx="8" fill="#F5F5F5" stroke="#BBBBBB" stroke-dasharray="4 3"/>
+  <text x="48" y="481" font-size="13" fill="#666">ハンドラーの外の処理（k に含まれない。これが「限定」継続の意味）</text>
+
+  <!-- 中央: 3 本の矢印 -->
+  <line x1="518" y1="222" x2="716" y2="150" stroke="#2F5FB3" stroke-width="2.2" marker-end="url(#arrBlue)"/>
+  <text x="640" y="156" font-size="14" font-weight="bold" fill="#1F4690" text-anchor="middle">① 操作を要求する</text>
+  <line x1="716" y1="232" x2="520" y2="234" stroke="#2F5FB3" stroke-width="2.2" stroke-dasharray="6 4" marker-end="url(#arrBlue)"/>
+  <text x="640" y="222" font-size="14" font-weight="bold" fill="#1F4690" text-anchor="middle">③ k(b) で再開する</text>
+  <line x1="524" y1="335" x2="716" y2="335" stroke="#B7791F" stroke-width="2.6" marker-end="url(#arrAmber)"/>
+  <text x="640" y="325" font-size="14" font-weight="bold" fill="#8A5A12" text-anchor="middle">② 残りを値 k で渡す</text>
+
+  <!-- 右: 継続の使い方 -->
+  <rect x="720" y="92" width="650" height="404" rx="10" fill="#F7FAFF" stroke="#2F5FB3" stroke-width="1.6"/>
+  <text x="738" y="118" font-size="15" font-weight="bold" fill="#1F4690">H.ask(a, k) の本体</text>
+  <text x="880" y="118" font-size="13" fill="#555">k をどう使うかはハンドラーが決める</text>
+
+  <g font-size="13" font-weight="bold" fill="#555">
+    <text x="738" y="150">k の使い方</text>
+    <text x="870" y="150">時間の流れ →</text>
+    <text x="1132" y="150">得られる機能</text>
+  </g>
+  <line x1="734" y1="160" x2="1356" y2="160" stroke="#BBC9E2"/>
+
+  <!-- 行 1: 呼ばない -->
+  <text x="738" y="197" font-size="14" font-weight="bold" fill="#222">呼ばない</text>
+  <rect x="870" y="181" width="70" height="22" rx="3" fill="#2F5FB3"/><text x="905" y="197" font-size="12" fill="#FFF" text-anchor="middle">H</text>
+  <rect x="946" y="181" width="150" height="22" rx="3" fill="none" stroke="#B7791F" stroke-dasharray="4 3"/><text x="1021" y="197" font-size="12" fill="#8A5A12" text-anchor="middle">k は走らない</text>
+  <text x="1132" y="197" font-size="14" fill="#222">例外、早期脱出</text>
+  <line x1="734" y1="222" x2="1356" y2="222" stroke="#E6ECF6"/>
+
+  <!-- 行 2: 末尾で 1 回 -->
+  <text x="738" y="265" font-size="14" font-weight="bold" fill="#222">末尾で 1 回</text>
+  <rect x="870" y="249" width="40" height="22" rx="3" fill="#2F5FB3"/><text x="890" y="265" font-size="12" fill="#FFF" text-anchor="middle">H</text>
+  <rect x="914" y="249" width="182" height="22" rx="3" fill="#E9A23B"/><text x="1005" y="265" font-size="12" fill="#3F2A06" text-anchor="middle">k</text>
+  <text x="1132" y="265" font-size="14" fill="#222">依存性の注入、State</text>
+  <line x1="734" y1="290" x2="1356" y2="290" stroke="#E6ECF6"/>
+
+  <!-- 行 3: 途中で 1 回 -->
+  <text x="738" y="333" font-size="14" font-weight="bold" fill="#222">途中で 1 回</text>
+  <rect x="870" y="317" width="40" height="22" rx="3" fill="#2F5FB3"/><text x="890" y="333" font-size="12" fill="#FFF" text-anchor="middle">H</text>
+  <rect x="914" y="317" width="134" height="22" rx="3" fill="#E9A23B"/><text x="981" y="333" font-size="12" fill="#3F2A06" text-anchor="middle">k</text>
+  <rect x="1052" y="317" width="44" height="22" rx="3" fill="#2F5FB3"/><text x="1074" y="333" font-size="12" fill="#FFF" text-anchor="middle">H</text>
+  <text x="1132" y="333" font-size="14" fill="#222">前後処理、トランザクション</text>
+  <line x1="734" y1="358" x2="1356" y2="358" stroke="#E6ECF6"/>
+
+  <!-- 行 4: 保存して後で -->
+  <text x="738" y="401" font-size="14" font-weight="bold" fill="#222">保存して後で</text>
+  <rect x="870" y="385" width="40" height="22" rx="3" fill="#2F5FB3"/><text x="890" y="401" font-size="12" fill="#FFF" text-anchor="middle">H</text>
+  <line x1="914" y1="396" x2="1000" y2="396" stroke="#999" stroke-width="1.6" stroke-dasharray="2 4"/>
+  <text x="957" y="381" font-size="11" fill="#777" text-anchor="middle">他の処理</text>
+  <rect x="1004" y="385" width="92" height="22" rx="3" fill="#E9A23B"/><text x="1050" y="401" font-size="12" fill="#3F2A06" text-anchor="middle">k</text>
+  <text x="1132" y="393" font-size="14" fill="#222">ジェネレーター、非同期、</text>
+  <text x="1132" y="411" font-size="14" fill="#222">スケジューラー</text>
+  <line x1="734" y1="426" x2="1356" y2="426" stroke="#E6ECF6"/>
+
+  <!-- 行 5: 複数回 -->
+  <text x="738" y="469" font-size="14" font-weight="bold" fill="#222">複数回</text>
+  <rect x="870" y="453" width="40" height="22" rx="3" fill="#2F5FB3"/><text x="890" y="469" font-size="12" fill="#FFF" text-anchor="middle">H</text>
+  <rect x="914" y="453" width="89" height="22" rx="3" fill="#E9A23B"/><text x="958" y="469" font-size="12" fill="#3F2A06" text-anchor="middle">k</text>
+  <rect x="1007" y="453" width="89" height="22" rx="3" fill="#E9A23B"/><text x="1051" y="469" font-size="12" fill="#3F2A06" text-anchor="middle">k</text>
+  <text x="1132" y="469" font-size="14" fill="#222">非決定計算、バックトラック</text>
+
+  <!-- 下段: ハンドラーを重ねる -->
+  <line x1="30" y1="520" x2="1370" y2="520" stroke="#DDDDDD"/>
+  <text x="30" y="550" font-size="15" font-weight="bold" fill="#222">ハンドラーを重ねると操作が消え、空になった計算だけが実行できる</text>
+
+  <g font-size="14">
+    <rect x="30" y="572" width="190" height="56" rx="8" fill="#FFFFFF" stroke="#888888"/>
+    <text x="125" y="595" fill="#222" text-anchor="middle" font-weight="bold">計算</text>
+    <text x="125" y="616" fill="#555" text-anchor="middle" font-family="Consolas,'Cascadia Mono',monospace">{ ask, emit }</text>
+
+    <line x1="224" y1="600" x2="386" y2="600" stroke="#2F5FB3" stroke-width="2.2" marker-end="url(#arrBlue)"/>
+    <text x="304" y="590" fill="#1F4690" text-anchor="middle" font-family="Consolas,'Cascadia Mono',monospace" font-size="13">handle Hask</text>
+    <text x="304" y="618" fill="#555" text-anchor="middle" font-size="12">ask を処理して消す</text>
+
+    <rect x="390" y="572" width="160" height="56" rx="8" fill="#FFFFFF" stroke="#888888"/>
+    <text x="470" y="595" fill="#222" text-anchor="middle" font-weight="bold">計算</text>
+    <text x="470" y="616" fill="#555" text-anchor="middle" font-family="Consolas,'Cascadia Mono',monospace">{ emit }</text>
+
+    <line x1="554" y1="600" x2="716" y2="600" stroke="#2F5FB3" stroke-width="2.2" marker-end="url(#arrBlue)"/>
+    <text x="634" y="590" fill="#1F4690" text-anchor="middle" font-family="Consolas,'Cascadia Mono',monospace" font-size="13">handle Hemit</text>
+    <text x="634" y="618" fill="#555" text-anchor="middle" font-size="12">emit を処理して消す</text>
+
+    <rect x="720" y="572" width="130" height="56" rx="8" fill="#FFFFFF" stroke="#888888"/>
+    <text x="785" y="595" fill="#222" text-anchor="middle" font-weight="bold">計算</text>
+    <text x="785" y="616" fill="#555" text-anchor="middle" font-family="Consolas,'Cascadia Mono',monospace">{ }</text>
+
+    <line x1="854" y1="600" x2="946" y2="600" stroke="#555" stroke-width="2.2" marker-end="url(#arrGray)"/>
+    <text x="898" y="590" fill="#333" text-anchor="middle" font-family="Consolas,'Cascadia Mono',monospace" font-size="13">run</text>
+
+    <rect x="950" y="572" width="70" height="56" rx="8" fill="#F5F5F5" stroke="#888888"/>
+    <text x="985" y="605" fill="#222" text-anchor="middle" font-weight="bold">値</text>
+  </g>
+  <text x="1050" y="592" font-size="13" fill="#555">外側のハンドラーが受け取る継続には</text>
+  <text x="1050" y="611" font-size="13" fill="#555">内側のハンドラーが含まれるので、</text>
+  <text x="1050" y="630" font-size="13" fill="#555">重ねる順序が計算の意味を変える。</text>
+
+  <text x="30" y="668" font-size="12" fill="#777">色の約束: 青はハンドラー、琥珀は継続。k の丈は実行時間の長さを表すものではない。</text>
+</svg>

@@ -1,0 +1,144 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="760" viewBox="0 0 1400 760" role="img" aria-label="図2 継続の置き場所。Direct はスレッドのスタックに継続を置くので普通の関数で書けるが再開は1回限りである。Freer はヒープ上のクロージャに置くので何度でも再開できるが計算を eff で書く。Async one-shot は Async の継続を使い、スレッドを占有しないが再開は1回限りで計算を async で書く。" font-family="'Yu Gothic UI','Yu Gothic','Meiryo','Hiragino Sans','Noto Sans JP',sans-serif">
+  <title>図2 継続の置き場所</title>
+  <defs>
+    <marker id="arrBlue2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2F5FB3"/></marker>
+    <marker id="arrAmber2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#B7791F"/></marker>
+    <marker id="arrRose2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#B23A48"/></marker>
+  </defs>
+  <rect x="0" y="0" width="1400" height="760" fill="#FFFFFF"/>
+
+  <text x="30" y="40" font-size="24" font-weight="bold" fill="#222">図2 継続の置き場所 — F# で方式が 1 つにまとまらない理由</text>
+  <text x="30" y="66" font-size="15" fill="#555">.NET にはスタックを複製する手段がないので、「普通の関数で書ける」と「何度でも再開できる」を同時には得られない。同じ計算が操作で止まったときの違いを並べた。</text>
+
+  <!-- 列の見出し -->
+  <g font-size="16" font-weight="bold" fill="#FFFFFF" text-anchor="middle">
+    <rect x="170" y="88" width="390" height="36" rx="6" fill="#3F4FA8"/><text x="365" y="112">Direct: スレッドのスタック</text>
+    <rect x="580" y="88" width="390" height="36" rx="6" fill="#3F4FA8"/><text x="775" y="112">Freer: ヒープ上のクロージャ</text>
+    <rect x="990" y="88" width="380" height="36" rx="6" fill="#3F4FA8"/><text x="1180" y="112">Async one-shot: Async の継続</text>
+  </g>
+
+  <text x="30" y="112" font-size="14" font-weight="bold" fill="#555">方式</text>
+  <text x="30" y="270" font-size="14" font-weight="bold" fill="#555">操作で</text>
+  <text x="30" y="290" font-size="14" font-weight="bold" fill="#555">止まったとき</text>
+
+  <rect x="170" y="128" width="390" height="340" fill="#FAFAFA" stroke="#DDDDDD"/>
+  <rect x="580" y="128" width="390" height="340" fill="#FAFAFA" stroke="#DDDDDD"/>
+  <rect x="990" y="128" width="380" height="340" fill="#FAFAFA" stroke="#DDDDDD"/>
+
+  <!-- Direct -->
+  <text x="262" y="156" font-size="13" fill="#555" text-anchor="middle">ハンドラー側のスレッド</text>
+  <text x="458" y="156" font-size="13" fill="#555" text-anchor="middle">ファイバーのスレッド</text>
+  <line x1="365" y1="140" x2="365" y2="400" stroke="#CCCCCC" stroke-dasharray="4 4"/>
+
+  <rect x="192" y="210" width="140" height="130" rx="8" fill="#E3EDFB" stroke="#2F5FB3"/>
+  <text x="262" y="268" font-size="15" font-weight="bold" fill="#1F4690" text-anchor="middle">ハンドラー</text>
+  <text x="262" y="290" font-size="12" fill="#1F4690" text-anchor="middle">動いている間</text>
+  <text x="262" y="307" font-size="12" fill="#1F4690" text-anchor="middle">相手は止まっている</text>
+
+  <rect x="392" y="172" width="142" height="172" rx="8" fill="#FDEBC8" stroke="#B7791F" stroke-width="1.6"/>
+  <g font-family="Consolas,'Cascadia Mono',monospace" font-size="14" fill="#5F3F0C" text-anchor="middle">
+    <rect x="404" y="210" width="118" height="30" fill="#FFF8E8" stroke="#D9B26B"/><text x="463" y="230">main ()</text>
+    <rect x="404" y="240" width="118" height="30" fill="#FFF8E8" stroke="#D9B26B"/><text x="463" y="260">askEmit ()</text>
+    <rect x="404" y="270" width="118" height="30" fill="#FFF8E8" stroke="#D9B26B"/><text x="463" y="290">perform</text>
+  </g>
+  <text x="463" y="193" font-size="13" font-weight="bold" fill="#8A5A12" text-anchor="middle">止まったスタック</text>
+  <text x="463" y="326" font-size="13" font-weight="bold" fill="#8A5A12" text-anchor="middle">これが継続 k</text>
+
+  <line x1="392" y1="238" x2="336" y2="238" stroke="#2F5FB3" stroke-width="2" marker-end="url(#arrBlue2)"/>
+  <text x="364" y="228" font-size="12" fill="#1F4690" text-anchor="middle">通知</text>
+  <line x1="332" y1="310" x2="388" y2="310" stroke="#2F5FB3" stroke-width="2" marker-end="url(#arrBlue2)"/>
+  <text x="360" y="300" font-size="12" fill="#1F4690" text-anchor="middle">再開</text>
+
+  <rect x="192" y="372" width="342" height="76" rx="8" fill="#FBECEE" stroke="#B23A48"/>
+  <text x="363" y="402" font-size="14" font-weight="bold" fill="#8E2A37" text-anchor="middle">スタックは 1 つしかなく、複製できない</text>
+  <text x="363" y="427" font-size="13" fill="#8E2A37" text-anchor="middle">再開すると k そのものが動き出して消える</text>
+
+  <!-- Freer -->
+  <text x="775" y="156" font-size="13" fill="#555" text-anchor="middle">計算は「操作と続き」のデータ</text>
+  <rect x="604" y="172" width="170" height="50" rx="8" fill="#FFFFFF" stroke="#888888"/>
+  <text x="689" y="203" font-size="15" fill="#222" text-anchor="middle">操作 op と継続 k の組</text>
+
+  <rect x="820" y="172" width="130" height="50" rx="8" fill="#E3EDFB" stroke="#2F5FB3"/>
+  <text x="885" y="203" font-size="15" font-weight="bold" fill="#1F4690" text-anchor="middle">ハンドラー</text>
+  <line x1="774" y1="197" x2="816" y2="197" stroke="#2F5FB3" stroke-width="2" marker-end="url(#arrBlue2)"/>
+
+  <rect x="690" y="256" width="170" height="52" rx="8" fill="#FDEBC8" stroke="#B7791F" stroke-width="1.6"/>
+  <text x="775" y="279" font-size="14" font-weight="bold" fill="#8A5A12" text-anchor="middle">継続 k</text>
+  <text x="775" y="298" font-size="12" fill="#8A5A12" text-anchor="middle">ヒープ上の普通の関数</text>
+  <line x1="885" y1="222" x2="862" y2="256" stroke="#2F5FB3" stroke-width="2" marker-end="url(#arrBlue2)"/>
+  <text x="896" y="245" font-size="12" fill="#1F4690">呼ぶ</text>
+
+  <line x1="735" y1="308" x2="680" y2="350" stroke="#B7791F" stroke-width="2.2" marker-end="url(#arrAmber2)"/>
+  <line x1="815" y1="308" x2="870" y2="350" stroke="#B7791F" stroke-width="2.2" marker-end="url(#arrAmber2)"/>
+  <rect x="604" y="352" width="150" height="40" rx="6" fill="#FFF8E8" stroke="#D9B26B"/>
+  <text x="679" y="377" font-size="13" fill="#5F3F0C" text-anchor="middle" font-family="Consolas,'Cascadia Mono',monospace">k(true) の結果</text>
+  <rect x="796" y="352" width="150" height="40" rx="6" fill="#FFF8E8" stroke="#D9B26B"/>
+  <text x="871" y="377" font-size="13" fill="#5F3F0C" text-anchor="middle" font-family="Consolas,'Cascadia Mono',monospace">k(false) の結果</text>
+
+  <rect x="604" y="404" width="342" height="44" rx="8" fill="#E8F4F2" stroke="#1F6E66"/>
+  <text x="775" y="431" font-size="14" font-weight="bold" fill="#1F6E66" text-anchor="middle">関数なので、何度呼んでも呼ばなくてもよい</text>
+
+  <!-- Async -->
+  <text x="1180" y="156" font-size="13" fill="#555" text-anchor="middle">止まったタスクはスレッドを持たない</text>
+  <rect x="1012" y="172" width="150" height="50" rx="8" fill="#FFFFFF" stroke="#888888" stroke-dasharray="5 3"/>
+  <text x="1087" y="193" font-size="14" fill="#222" text-anchor="middle">止まったタスク</text>
+  <text x="1087" y="212" font-size="12" fill="#555" text-anchor="middle">スレッドなし</text>
+
+  <rect x="1200" y="172" width="150" height="50" rx="8" fill="#E3EDFB" stroke="#2F5FB3"/>
+  <text x="1275" y="193" font-size="14" font-weight="bold" fill="#1F4690" text-anchor="middle">スケジューラー</text>
+  <text x="1275" y="212" font-size="12" fill="#1F4690" text-anchor="middle">スレッド 1 本</text>
+
+  <rect x="1100" y="256" width="170" height="52" rx="8" fill="#FDEBC8" stroke="#B7791F" stroke-width="1.6"/>
+  <text x="1185" y="279" font-size="14" font-weight="bold" fill="#8A5A12" text-anchor="middle">継続 k</text>
+  <text x="1185" y="298" font-size="12" fill="#5F3F0C" text-anchor="middle" font-family="Consolas,'Cascadia Mono',monospace">(ok, err)</text>
+  <line x1="1275" y1="222" x2="1245" y2="254" stroke="#2F5FB3" stroke-width="2" marker-end="url(#arrBlue2)"/>
+  <text x="1284" y="245" font-size="12" fill="#1F4690">保存する</text>
+
+  <line x1="1120" y1="256" x2="1094" y2="226" stroke="#B7791F" stroke-width="2.2" marker-end="url(#arrAmber2)"/>
+  <text x="1076" y="250" font-size="12" fill="#8A5A12" text-anchor="middle">1 回目の ok</text>
+
+  <line x1="1185" y1="308" x2="1185" y2="350" stroke="#B23A48" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#arrRose2)"/>
+  <rect x="1012" y="352" width="338" height="40" rx="6" fill="#FBECEE" stroke="#B23A48"/>
+  <text x="1181" y="377" font-size="13" fill="#8E2A37" text-anchor="middle">2 回目は FSharp.Core が例外にする</text>
+
+  <rect x="1012" y="404" width="338" height="44" rx="8" fill="#F5F5F5" stroke="#BBBBBB"/>
+  <text x="1181" y="431" font-size="13" fill="#444" text-anchor="middle">err で再開すると、止まった位置の finally が走る</text>
+
+  <!-- 下段の比較 -->
+  <g font-size="14" fill="#555" font-weight="bold">
+    <text x="30" y="508">計算の書き方</text>
+    <text x="30" y="558">再開の回数</text>
+    <text x="30" y="608">2 回目の再開</text>
+    <text x="30" y="658">止まっている間</text>
+    <text x="30" y="676">に持つもの</text>
+  </g>
+  <g stroke="#E6E6E6">
+    <line x1="30" y1="524" x2="1370" y2="524"/>
+    <line x1="30" y1="574" x2="1370" y2="574"/>
+    <line x1="30" y1="624" x2="1370" y2="624"/>
+    <line x1="30" y1="692" x2="1370" y2="692"/>
+  </g>
+
+  <g font-size="15" text-anchor="middle">
+    <rect x="280" y="486" width="170" height="30" rx="5" fill="#E8F4F2"/>
+    <text x="365" y="507" fill="#1F6E66" font-weight="bold">普通の関数</text>
+    <text x="775" y="507" fill="#333">コンピュテーション式</text>
+    <text x="1180" y="507" fill="#333">async 式</text>
+
+    <text x="365" y="557" fill="#333">1 回</text>
+    <rect x="690" y="536" width="170" height="30" rx="5" fill="#E8F4F2"/>
+    <text x="775" y="557" fill="#1F6E66" font-weight="bold">何回でも</text>
+    <text x="1180" y="557" fill="#333">1 回</text>
+
+    <text x="365" y="607" fill="#333">例外（エンジンが検査する）</text>
+    <text x="775" y="607" fill="#333">制限なし</text>
+    <text x="1180" y="607" fill="#333">例外（FSharp.Core が検査する）</text>
+
+    <rect x="280" y="642" width="170" height="30" rx="5" fill="#FBECEE"/>
+    <text x="365" y="663" fill="#8E2A37" font-weight="bold">スレッド 1 本</text>
+    <text x="775" y="663" fill="#333">クロージャだけ</text>
+    <text x="1180" y="663" fill="#333">継続のオブジェクトだけ</text>
+  </g>
+
+  <text x="30" y="728" font-size="12" fill="#777">緑はその方式だけが持つ利点、赤は代償または制限を示す。青はハンドラー、琥珀は継続で、図1と同じ色である。</text>
+</svg>

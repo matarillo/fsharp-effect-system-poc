@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="830" viewBox="0 0 1400 830" role="img" aria-label="図3 設計空間の地図。横軸は再開の回数、縦軸はハンドラーの付け忘れを検出する時期である。元の言語は何回でも再開できてコンパイル時に検出する領域に集まり、OCaml だけが1回限りで実行時に検出する領域にある。Koka、Unison、Polysemy を Freer に写すと静的検査を失うが、Freer の上に Capability や StaticRow を積むと検査が戻る。アプリケーションの既定は Capability と Rio である。" font-family="'Yu Gothic UI','Yu Gothic','Meiryo','Hiragino Sans','Noto Sans JP',sans-serif">
+  <title>図3 設計空間の地図</title>
+  <defs>
+    <marker id="arrGray3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#555"/></marker>
+    <marker id="arrRose3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#B23A48"/></marker>
+    <marker id="arrTeal3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1F6E66"/></marker>
+  </defs>
+  <rect x="0" y="0" width="1400" height="830" fill="#FFFFFF"/>
+
+  <text x="30" y="40" font-size="24" font-weight="bold" fill="#222">図3 設計空間の地図 — 元の言語はどこにあり、F# へ写すと何が変わり、どれを選ぶか</text>
+  <text x="30" y="66" font-size="15" fill="#555">位置は実装とテストで確認した性質によるもので、優劣ではない。枠の中の短い説明は、その方式を選ぶ場面である。</text>
+
+  <!-- 軸の見出し -->
+  <text x="300" y="104" font-size="15" font-weight="bold" fill="#333" text-anchor="middle">再開は 1 回限り</text>
+  <text x="930" y="104" font-size="15" font-weight="bold" fill="#333" text-anchor="middle">何回でも再開できる</text>
+  <text x="56" y="290" font-size="15" font-weight="bold" fill="#333" text-anchor="middle" transform="rotate(-90 56 290)">付け忘れはコンパイル時に分かる</text>
+  <text x="56" y="640" font-size="15" font-weight="bold" fill="#333" text-anchor="middle" transform="rotate(-90 56 640)">付け忘れは実行時に分かる</text>
+
+  <!-- 4 つの領域 -->
+  <rect x="80" y="116" width="440" height="400" rx="10" fill="#F7F7FB" stroke="#D5D5E5"/>
+  <rect x="534" y="116" width="836" height="400" rx="10" fill="#F2F4FC" stroke="#C5CBEA"/>
+  <rect x="80" y="530" width="440" height="222" rx="10" fill="#F7F7FB" stroke="#D5D5E5"/>
+  <rect x="534" y="530" width="836" height="222" rx="10" fill="#F7F7FB" stroke="#D5D5E5"/>
+
+  <text x="98" y="142" font-size="13" fill="#666">元の言語にはない組み合わせ</text>
+  <text x="552" y="142" font-size="13" fill="#666">元の言語の多くはここにある</text>
+  <text x="98" y="556" font-size="13" fill="#666">OCaml と同じ位置</text>
+  <text x="552" y="556" font-size="13" fill="#666">元の言語にはない組み合わせ</text>
+
+  <!-- 元の言語 (白地の枠) -->
+  <g font-size="15" fill="#333" text-anchor="middle">
+    <rect x="570" y="162" width="190" height="42" rx="21" fill="#FFFFFF" stroke="#888888"/>
+    <text x="665" y="188">PureScript Run</text>
+    <rect x="570" y="244" width="190" height="42" rx="21" fill="#FFFFFF" stroke="#888888"/>
+    <text x="665" y="270">Effekt</text>
+    <rect x="570" y="340" width="190" height="42" rx="21" fill="#FFFFFF" stroke="#888888"/>
+    <text x="665" y="366">Koka</text>
+    <rect x="570" y="388" width="190" height="42" rx="21" fill="#FFFFFF" stroke="#888888"/>
+    <text x="665" y="414">Unison</text>
+    <rect x="570" y="436" width="190" height="42" rx="21" fill="#FFFFFF" stroke="#888888"/>
+    <text x="665" y="462">Polysemy</text>
+    <rect x="110" y="618" width="120" height="42" rx="21" fill="#FFFFFF" stroke="#888888"/>
+    <text x="170" y="644">OCaml</text>
+  </g>
+
+  <!-- F# の方式 -->
+  <g font-size="16" font-weight="bold" fill="#FFFFFF" text-anchor="middle">
+    <rect x="890" y="150" width="240" height="66" rx="8" fill="#6B77C4"/>
+    <text x="1010" y="176">FSharpPlus Free</text>
+    <text x="1010" y="200" font-size="12" font-weight="normal">既存の FSharpPlus のコードに</text>
+
+    <rect x="890" y="232" width="240" height="76" rx="8" fill="#26347F" stroke="#E9A23B" stroke-width="3"/>
+    <text x="1010" y="258">★ Capability + Rio</text>
+    <text x="1010" y="280" font-size="12" font-weight="normal">アプリケーションの既定</text>
+    <text x="1010" y="297" font-size="12" font-weight="normal">能力の値で操作を指す</text>
+
+    <rect x="1150" y="232" width="200" height="76" rx="8" fill="#6B77C4"/>
+    <text x="1250" y="258">StaticRow</text>
+    <text x="1250" y="280" font-size="12" font-weight="normal">閉じた小さな領域で</text>
+    <text x="1250" y="297" font-size="12" font-weight="normal">行を 1 段ずつ消す</text>
+
+    <rect x="170" y="210" width="240" height="76" rx="8" fill="#3F4FA8"/>
+    <text x="290" y="236">Async one-shot</text>
+    <text x="290" y="258" font-size="12" font-weight="normal">既存の async コードに組み込む</text>
+    <text x="290" y="275" font-size="12" font-weight="normal">操作はメソッド、スレッドは 1 本</text>
+
+    <rect x="270" y="600" width="230" height="78" rx="8" fill="#3F4FA8"/>
+    <text x="385" y="626">Direct</text>
+    <text x="385" y="648" font-size="12" font-weight="normal">関数の色を変えられないときに</text>
+    <text x="385" y="665" font-size="12" font-weight="normal">計算は普通の関数のまま</text>
+
+    <rect x="890" y="600" width="300" height="78" rx="8" fill="#3F4FA8"/>
+    <text x="1040" y="626">Freer</text>
+    <text x="1040" y="648" font-size="12" font-weight="normal">継続を直接扱うライブラリ、学習に</text>
+    <text x="1040" y="665" font-size="12" font-weight="normal">モデルに最も近い。Capability の土台</text>
+  </g>
+
+  <!-- 写す: そのまま -->
+  <line x1="760" y1="183" x2="886" y2="183" stroke="#555" stroke-width="2" marker-end="url(#arrGray3)"/>
+  <line x1="760" y1="265" x2="886" y2="265" stroke="#555" stroke-width="2" marker-end="url(#arrGray3)"/>
+  <line x1="230" y1="639" x2="266" y2="639" stroke="#555" stroke-width="2" marker-end="url(#arrGray3)"/>
+  <text x="823" y="173" font-size="12" fill="#444" text-anchor="middle">写す</text>
+  <text x="823" y="255" font-size="12" fill="#444" text-anchor="middle">写す</text>
+  <text x="248" y="627" font-size="12" fill="#444" text-anchor="middle">写す</text>
+
+  <!-- 写す: 静的検査を失う -->
+  <rect x="556" y="330" width="218" height="158" rx="12" fill="none" stroke="#B23A48" stroke-dasharray="5 4"/>
+  <path d="M665,488 C665,560 760,639 886,639" fill="none" stroke="#B23A48" stroke-width="2.4" marker-end="url(#arrRose3)"/>
+  <text x="736" y="580" font-size="14" font-weight="bold" fill="#8E2A37">写すと静的検査を失う</text>
+  <text x="736" y="600" font-size="12" fill="#8E2A37">行多相が F# にないため</text>
+
+  <!-- 積むと検査が戻る -->
+  <line x1="980" y1="600" x2="980" y2="312" stroke="#1F6E66" stroke-width="2.4" marker-end="url(#arrTeal3)"/>
+  <line x1="1130" y1="600" x2="1230" y2="312" stroke="#1F6E66" stroke-width="2.4" marker-end="url(#arrTeal3)"/>
+  <rect x="992" y="412" width="172" height="46" rx="6" fill="#FFFFFF" stroke="#BFDAD6"/>
+  <text x="1078" y="431" font-size="14" font-weight="bold" fill="#1F6E66" text-anchor="middle">上に積むと検査が戻る</text>
+  <text x="1078" y="449" font-size="12" fill="#1F6E66" text-anchor="middle">再開の回数は変わらない</text>
+
+  <!-- 凡例 -->
+  <g font-size="13" fill="#333">
+    <rect x="80" y="772" width="70" height="24" rx="12" fill="#FFFFFF" stroke="#888888"/>
+    <text x="160" y="789">元の言語</text>
+    <rect x="240" y="772" width="70" height="24" rx="5" fill="#3F4FA8"/>
+    <text x="320" y="789">F# の方式（薄いものは用途が限られる、★は既定）</text>
+    <line x1="680" y1="784" x2="730" y2="784" stroke="#555" stroke-width="2" marker-end="url(#arrGray3)"/>
+    <text x="740" y="789">位置を保って写す</text>
+    <line x1="870" y1="784" x2="920" y2="784" stroke="#B23A48" stroke-width="2.4" marker-end="url(#arrRose3)"/>
+    <text x="930" y="789">写すと失う</text>
+    <line x1="1020" y1="784" x2="1070" y2="784" stroke="#1F6E66" stroke-width="2.4" marker-end="url(#arrTeal3)"/>
+    <text x="1080" y="789">上に積む（実装上の依存）</text>
+  </g>
+</svg>
