@@ -275,7 +275,7 @@ let private recordRet (n: int) =
                 member _.Ask() = Eff.ret 1 } |}
     |> Eff.run
 
-/// <summary><c>Async.FromContinuations</c> を測る。コールバックの中で同期的に再開する、最も速い経路である。</summary>
+/// <summary><c>AsyncOneShot.capture</c> を測る。コールバックの中で同期的に再開する、最も速い経路で、トークンへの登録を含む。</summary>
 let private asyncOneShot (n: int) =
     let body =
         async {
@@ -332,7 +332,7 @@ let run () =
     measure "RecordEnv (reset/shift)" 2_000_000 recordShift
     measure "RecordEnv (Eff.ret)" 2_000_000 recordRet
     measure "FSharpPlus Free (Free.run)" 1_000_000 fsharpPlusFree
-    measure "Async.FromContinuations" 2_000_000 asyncOneShot
+    measure "Async one-shot (capture)" 2_000_000 asyncOneShot
     measure "Direct + fn (thread handoff)" 100_000 directFn
     measure "Direct + ctl (thread handoff)" 20_000 directCtl
     measure "Direct: fiber create + finish" 5_000 directFiberCreation

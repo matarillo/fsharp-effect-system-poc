@@ -3,6 +3,7 @@ module EffectSystem.Tests.Tests
 open System
 open System.Diagnostics
 open System.IO
+open System.Threading
 open System.Threading.Tasks
 open Expecto
 open FSharpPlus
@@ -1048,7 +1049,37 @@ let asyncOneShot =
                   ""
 
           testCase "2 回の再開は FSharp.Core が拒否する"
-          <| fun () -> Expect.throwsT<InvalidOperationException> AsyncOneShot.resumeTwice "" ]
+          <| fun () -> Expect.throwsT<InvalidOperationException> AsyncOneShot.resumeTwice ""
+
+          testCase "止まっている計算は Cancel で finally が走り、その後の再開は何も起こさない"
+          <| fun () ->
+              Expect.equal
+                  (capture AsyncOneShot.cancelWhileParked)
+                  [ "parked"; "finally"; "cancelled"; "resumed after cancel" ]
+                  ""
+
+          testCase "再開の後の Cancel は何も起こさない"
+          <| fun () ->
+              use source = new CancellationTokenSource()
+              use finished = new ManualResetEventSlim(false)
+              let saved = ref None
+              let result = ref 0
+
+              Async.StartWithContinuations(
+                  AsyncOneShot.capture (fun k -> saved.Value <- Some k),
+                  (fun v ->
+                      result.Value <- v
+                      finished.Set()),
+                  ignore,
+                  ignore,
+                  source.Token
+              )
+
+              let k: AsyncOneShot.Continuation<int> = saved.Value.Value
+              k.Resume 1
+              Expect.isTrue (finished.Wait 5000) "再開で計算が終わる"
+              source.Cancel()
+              Expect.equal result.Value 1 "" ]
 
 open EffectSystem.Samples.ZioStyle
 

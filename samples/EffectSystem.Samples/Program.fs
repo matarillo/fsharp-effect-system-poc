@@ -57,6 +57,7 @@ let private showAll () =
 
     section "Async one-shot: 24.3" AsyncOneShot.userLevelThreads
     section "Async one-shot: discontinue" AsyncOneShot.resumingWithAnException
+    section "Async one-shot: 止まっている間の中断" AsyncOneShot.cancelWhileParked
 
     section "静的な行: askEmit" StaticRow.exampleAskEmit
 

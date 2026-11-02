@@ -13,6 +13,7 @@
 /// <category index="4">発展</category>
 module EffectSystem.Samples.AsyncOneShot
 
+open System
 open System.Collections.Generic
 open System.Threading
 open EffectSystem.Samples.Effects
@@ -25,10 +26,55 @@ type Continuation<'a> =
       /// <summary>例外で再開する。中断している位置で例外が発生し、<c>finally</c> が走る。</summary>
       Discontinue: exn -> unit }
 
+/// <summary>止まっている計算の状態。<c>Interlocked</c> で 1 度だけ変える。</summary>
+module private CaptureState =
+    /// <summary>再開も中断もまだ届いていない。</summary>
+    [<Literal>]
+    let Parked = 0
+
+    /// <summary>再開が先に届いた。</summary>
+    [<Literal>]
+    let Resumed = 1
+
+    /// <summary>中断が先に届いた。</summary>
+    [<Literal>]
+    let Cancelled = 2
+
 /// <summary>中断して継続を取り出す。2 回目の再開は FSharp.Core が <c>InvalidOperationException</c> にする。</summary>
+/// <remarks>
+/// <para>
+/// <c>FromContinuations</c> の <c>cancel</c> は自動では呼ばれない。呼ばなければ、止まっている計算は <c>Cancel</c> に応じず、<c>finally</c> も走らない。
+/// そこでトークンに登録して、自分で呼ぶ。
+/// </para>
+/// <para>
+/// 中断が先に届いた継続を後から再開しても、計算はもう終わっているので何も起きない。
+/// スケジューラーのキューに残った再開は、そのまま呼んでよい。
+/// </para>
+/// </remarks>
 /// <param name="f">継続を受け取る関数。保存しておいて後で再開してよい。</param>
 let capture (f: Continuation<'a> -> unit) : Async<'a> =
-    Async.FromContinuations(fun (ok, err, _) -> f { Resume = ok; Discontinue = err })
+    async {
+        let! token = Async.CancellationToken
+
+        return!
+            Async.FromContinuations(fun (ok, err, cancel) ->
+                let state = ref CaptureState.Parked
+                let registration = ref Unchecked.defaultof<CancellationTokenRegistration>
+
+                // 2 回目の再開は ok と err がそのまま拒否する。
+                let resumeWith (continuation: 'x -> unit) (x: 'x) =
+                    if Interlocked.CompareExchange(&state.contents, CaptureState.Resumed, CaptureState.Parked) <> CaptureState.Cancelled then
+                        registration.Value.Unregister() |> ignore
+                        continuation x
+
+                registration.Value <-
+                    token.Register(fun () ->
+                        if Interlocked.CompareExchange(&state.contents, CaptureState.Cancelled, CaptureState.Parked) = CaptureState.Parked then
+                            cancel (OperationCanceledException token))
+
+                if state.Value = CaptureState.Parked then
+                    f { Resume = resumeWith ok; Discontinue = resumeWith err })
+    }
 
 /// <summary>交換の相手がいないまま止まったタスクへ届ける例外。</summary>
 exception ImproperSynchronization
@@ -136,3 +182,32 @@ let resumeTwice () : unit =
     let k: Continuation<unit> = saved.Value.Value
     k.Resume()
     k.Resume()
+
+/// <summary>止まっている計算を中断すると <c>finally</c> が走る。その後の再開は何も起こさない。</summary>
+/// <param name="out">出力先。</param>
+let cancelWhileParked (out: Log) : unit =
+    use source = new CancellationTokenSource()
+    use finished = new ManualResetEventSlim(false)
+    let saved = ref None
+
+    let task =
+        async {
+            try
+                out "parked"
+                do! capture (fun k -> saved.Value <- Some k)
+                out "not reached"
+            finally
+                out "finally"
+        }
+
+    let onCancelled (_: OperationCanceledException) =
+        out "cancelled"
+        finished.Set()
+
+    Async.StartWithContinuations(task, ignore, ignore, onCancelled, source.Token)
+    source.Cancel()
+    finished.Wait()
+
+    let k: Continuation<unit> = saved.Value.Value
+    k.Resume()
+    out "resumed after cancel"
