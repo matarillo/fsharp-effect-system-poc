@@ -286,3 +286,94 @@ let exampleLocalAsk (out: Log) : int =
         return! Rio.run emit (localAsk ())
     }
     |> Eff.run
+
+// ---- 能力の寿命 ----
+
+/// <summary>問い合わせの能力。</summary>
+type IDb =
+    /// <summary>問い合わせる。</summary>
+    abstract Query: string -> Eff<string>
+
+/// <summary><c>IDb</c> を使う能力。</summary>
+type IRepo =
+    /// <summary>値を探す。</summary>
+    abstract Find: string -> Eff<string>
+
+/// <summary><c>IDb</c> を使う、もう 1 つの能力。</summary>
+type ICache =
+    /// <summary>値を取り出す。</summary>
+    abstract Get: string -> Eff<string>
+
+/// <summary>能力を作り、スコープの終わりに解放するハンドラー。ZIO の <c>ZLayer.scoped</c> に当たる。</summary>
+/// <remarks>
+/// <c>handlers { }</c> で重ねると、依存の共有、逆順の解放、構築の途中の失敗を ZLayer と同じように扱える。
+/// 依存の順序は <c>let!</c> の順序として手で書く。ZLayer の自動配線はマクロなしでは書けない。
+/// 解放は <c>try ... finally</c> なので、外側のハンドラーが継続を捨てると走らない。
+/// </remarks>
+/// <param name="out">出力先。</param>
+/// <param name="name">能力の名前。</param>
+/// <param name="make">能力を作る関数。</param>
+/// <param name="action">能力を受け取る計算。</param>
+let scoped (out: Log) (name: string) (make: unit -> 'cap) (action: 'cap -> Eff<'r>) : Eff<'r> =
+    eff {
+        out $"acquire {name}"
+        let cap = make ()
+
+        try
+            return! action cap
+        finally
+            out $"release {name}"
+    }
+
+/// <summary><c>IDb</c> を作るハンドラー。</summary>
+/// <param name="out">出力先。</param>
+let dbHandler (out: Log) =
+    scoped out "db" (fun () ->
+        { new IDb with
+            member _.Query q = Eff.ret ("row:" + q) })
+
+/// <summary><c>IDb</c> に依存する <c>IRepo</c> を作るハンドラー。</summary>
+/// <param name="out">出力先。</param>
+/// <param name="db">依存する能力。</param>
+let repoHandler (out: Log) (db: IDb) =
+    scoped out "repo" (fun () ->
+        { new IRepo with
+            member _.Find k = db.Query k })
+
+/// <summary><c>IDb</c> に依存する <c>ICache</c> を作るハンドラー。</summary>
+/// <param name="out">出力先。</param>
+/// <param name="db">依存する能力。</param>
+let cacheHandler (out: Log) (db: IDb) =
+    scoped out "cache" (fun () ->
+        { new ICache with
+            member _.Get k = db.Query k })
+
+/// <summary>2 つの能力が同じ <c>IDb</c> を共有する。解放は作った順の逆になる。</summary>
+/// <param name="out">出力先。</param>
+let exampleScoped (out: Log) : unit =
+    let result =
+        handlers {
+            let! db = dbHandler out
+            let! repo = repoHandler out db
+            let! cache = cacheHandler out db
+
+            return!
+                eff {
+                    let! a = repo.Find "a"
+                    let! b = cache.Get "b"
+                    return a + "," + b
+                }
+        }
+        |> Eff.run
+
+    out result
+
+/// <summary>構築の途中で失敗すると、作れた能力だけを解放して例外を伝える。</summary>
+/// <param name="out">出力先。</param>
+let exampleScopedFailure (out: Log) : unit =
+    handlers {
+        let! _ = dbHandler out
+        let! _ = scoped out "bad" (fun () -> (failwith "connect failed": IRepo))
+        return! Eff.ret ()
+    }
+    |> Eff.run

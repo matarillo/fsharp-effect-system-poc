@@ -167,3 +167,67 @@ let finallyWithDiscontinue (out: Log) : unit =
     |> Eff.handle
         [ Eff.ctlK (fun (_: Ask<string>) k -> k.Discontinue(exn "unwind")) ]
     |> Eff.run
+
+// ---- 途中で 1 回: トランザクション ----
+
+/// <summary>トランザクションの開始を要求する操作。</summary>
+type Begin =
+    /// <summary>開始を要求する。</summary>
+    | Begin
+
+    interface Effect<unit>
+
+/// <summary>継続を途中で 1 回呼ぶハンドラー。再開の前後に処理を挟む。ZIO の <c>atomically</c> に当たる。</summary>
+/// <remarks>
+/// 継続の結果を受け取ってから <c>commit</c> し、例外なら <c>rollback</c> して外へ伝える。
+/// <c>try</c> がなければ、例外のときに <c>commit</c> も <c>rollback</c> も走らない。
+/// </remarks>
+/// <param name="out">出力先。</param>
+/// <param name="m">ハンドラーを被せる計算。</param>
+let transaction (out: Log) (m: Eff<'a>) : Eff<'a> =
+    m
+    |> Eff.handle
+        [ Eff.ctl (fun Begin resume ->
+              eff {
+                  out "begin"
+
+                  try
+                      let! r = resume ()
+                      out "commit"
+                      return r
+                  with e ->
+                      out $"rollback: {e.Message}"
+                      return raise e
+              }) ]
+
+/// <summary>正常に終わると <c>commit</c> する。</summary>
+/// <param name="out">出力先。</param>
+let transactionCommits (out: Log) : unit =
+    eff {
+        do! Eff.perform Begin
+        out "work"
+    }
+    |> transaction out
+    |> Eff.run
+
+/// <summary><c>Begin</c> を重ねると、内側から順に <c>commit</c> する。</summary>
+/// <param name="out">出力先。</param>
+let transactionNested (out: Log) : unit =
+    eff {
+        do! Eff.perform Begin
+        out "a"
+        do! Eff.perform Begin
+        out "b"
+    }
+    |> transaction out
+    |> Eff.run
+
+/// <summary>例外で終わると <c>rollback</c> して、例外を外へ伝える。</summary>
+/// <param name="out">出力先。</param>
+let transactionRollsBack (out: Log) : unit =
+    eff {
+        do! Eff.perform Begin
+        failwith "work failed"
+    }
+    |> transaction out
+    |> Eff.run

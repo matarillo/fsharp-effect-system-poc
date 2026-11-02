@@ -848,7 +848,21 @@ let freerSemantics =
               }
               |> Eff.run
 
-              Expect.equal (List.ofSeq lines) [ "body"; "finally" ] "" ]
+              Expect.equal (List.ofSeq lines) [ "body"; "finally" ] ""
+
+          testCase "途中で 1 回再開するハンドラーは前後に処理を挟む"
+          <| fun () ->
+              Expect.equal (capture Advanced.transactionCommits) [ "begin"; "work"; "commit" ] ""
+
+          testCase "途中で 1 回再開するハンドラーを重ねると内側から終わる"
+          <| fun () ->
+              Expect.equal (capture Advanced.transactionNested) [ "begin"; "a"; "begin"; "b"; "commit"; "commit" ] ""
+
+          testCase "途中で 1 回再開するハンドラーは継続の例外を受ける"
+          <| fun () ->
+              let lines, e = captureFailure Advanced.transactionRollsBack
+              Expect.equal lines [ "begin"; "rollback: work failed" ] ""
+              Expect.equal e.Message "work failed" "" ]
 
 let capabilitySemantics =
     testList
@@ -888,6 +902,25 @@ let capabilitySemantics =
               let lines = ResizeArray<string>()
               Expect.equal (EffektStyle.exampleLocalAsk lines.Add) 5 ""
               Expect.equal (List.ofSeq lines) [ "Emit before"; "Emit local"; "Emit after" ] ""
+
+          testCase "能力は共有され、作った順の逆に解放される"
+          <| fun () ->
+              Expect.equal
+                  (capture EffektStyle.exampleScoped)
+                  [ "acquire db"
+                    "acquire repo"
+                    "acquire cache"
+                    "release cache"
+                    "release repo"
+                    "release db"
+                    "row:a,row:b" ]
+                  ""
+
+          testCase "能力の構築の途中で失敗すると、作れたものだけ解放する"
+          <| fun () ->
+              let lines, e = captureFailure EffektStyle.exampleScopedFailure
+              Expect.equal lines [ "acquire db"; "acquire bad"; "release db" ] ""
+              Expect.equal e.Message "connect failed" ""
 
           testCase "末尾で 1 回再開するだけの能力は Eff.ret で答えても結果が同じ"
           <| fun () ->

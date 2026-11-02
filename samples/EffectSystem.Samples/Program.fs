@@ -28,6 +28,8 @@ let private showAll () =
     section "Effekt: 両方を 2 回再開" EffektStyle.exampleBothTwice
     section "Effekt: インターフェイス制約を行として使う" EffektStyle.exampleAskEmitRow
     section "Effekt: 行の一部を途中で消す" (fun out -> out (string (EffektStyle.exampleLocalAsk out)))
+    section "Effekt: 能力の寿命" EffektStyle.exampleScoped
+    attempt "Effekt: 能力の構築の途中の失敗" EffektStyle.exampleScopedFailure
     section "Effekt: 字句スコープ" (fun out -> out (string (EffektStyle.exampleLexicalAddressing ())))
     attempt "Effekt: 持ち出した能力" (fun out -> out (EffektStyle.exampleEscapedCapability ()))
 
@@ -66,6 +68,10 @@ let private showAll () =
     section "State × NonDet" (fun out ->
         out $"State が内側: %A{Advanced.stateInsideNonDet ()}"
         out $"State が外側: %A{Advanced.stateOutsideNonDet ()}")
+
+    section "トランザクション: commit" Advanced.transactionCommits
+    section "トランザクション: 重ねる" Advanced.transactionNested
+    attempt "トランザクション: rollback" Advanced.transactionRollsBack
 
 /// <summary>エントリーポイント。</summary>
 /// <remarks>
