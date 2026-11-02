@@ -12,6 +12,7 @@
 
 - [docs/porting-notes.md](docs/porting-notes.md): 元資料の読解、エンジンごとの実装、各言語との対応、実測値、制限
 - [docs/row-polymorphism-report.md](docs/row-polymorphism-report.md): SRTP で行多相をどこまで模倣できるかの検証
+- [docs/zio-report.md](docs/zio-report.md): Scala の ZIO とモデルの対応、F# のコードに活用できるものの検証
 - API ドキュメント: XML コメントから生成します。型の設計思想はここにあります（[生成のしかた](#ドキュメントの生成)）
 
 ## 動かし方
@@ -32,7 +33,7 @@ dotnet run -c Release --project samples/EffectSystem.Samples -- bench
 dotnet run -c Release --project samples/EffectSystem.Samples -- limit direct-ctl 100000
 ```
 
-`limit` のエンジン名は `plain-recursion`、`direct-fn`、`direct-ctl`、`freer-fn`、`freer-ctl`、`freer-left`、`freer-tail-do` です。
+`limit` のエンジン名は `plain-recursion`、`direct-fn`、`direct-ctl`、`freer-fn`、`freer-ctl`、`freer-left`、`freer-fold`、`freer-try`、`freer-alternate`、`freer-tail-do` です。
 
 ### ドキュメントの生成
 
@@ -151,10 +152,12 @@ run return("x") = "x"
 |---|---|---|---|
 | 呼ばない | 例外、早期脱出 | `raise(e, _) = return(Error e)` | [KokaStyle.fs](samples/EffectSystem.Samples/KokaStyle.fs) の `tryResumable` |
 | 末尾で 1 回 | 依存性の注入、Reader | `ask(_, k) = k(v)` | [KokaStyle.fs](samples/EffectSystem.Samples/KokaStyle.fs) の `askHandler` |
-| 途中で 1 回 | 前後処理、トランザクション | `op(a, k) = 前処理; r = k(b); 後処理; r` | |
+| 途中で 1 回 | 前後処理、トランザクション | `op(a, k) = 前処理; r = k(b); 後処理; r` | [Advanced.fs](samples/EffectSystem.Samples/Advanced.fs) の `transaction` |
 | 状態を渡しながら 1 回 | State | `get(_, k) = λs. k(s)(s)` | [Advanced.fs](samples/EffectSystem.Samples/Advanced.fs) の `runState` |
 | 保存して後で | ジェネレーター、非同期、スケジューラー | `yield(v, k) = Cons(v, k)` | [OCamlManual.fs](samples/EffectSystem.Samples/OCamlManual.fs) の `invert`、`run` |
 | 複数回 | 非決定計算、バックトラック | `choose(_, k) = k(true) ++ k(false)` | [Advanced.fs](samples/EffectSystem.Samples/Advanced.fs) の `runAll` |
+
+Scala の ZIO は、この表のうち複数回の再開を除く 5 行をランタイムの命令として持ちます（[対応表](docs/zio-report.md#2-zio-の位置づけ)）。継続を利用者に渡さないので、中断の最中でも後始末を保証できます（[課題 8](#課題-8-失敗と中断を分けられない)）。
 
 ### ハンドラーの順序が意味を決める
 
@@ -169,13 +172,16 @@ handle State(0) (handle NonDet program)  → ([(true, 0), (false, 1)], 2)       
 
 モナド変換子の積み順と同じ現象です。順序は欠陥ではなく、計算の意味を選ぶ手段になります（[Advanced.fs](samples/EffectSystem.Samples/Advanced.fs) の `stateInsideNonDet`、`stateOutsideNonDet`）。
 
+順序が意味を持つのは、継続を複製したり、保存したり、捨てたりするハンドラーがあるときです。別々の操作を扱うハンドラーが末尾で 1 回再開するだけなら、順序を変えても結果は変わりません。ZIO の `provide` が層を渡す順序を問わないのも、サービスがすべてこの形なので成り立ちます（[確認](docs/zio-report.md#7-レイヤー-順序が意味を持たないハンドラー)）。
+
 ### 実装を分ける設計軸
 
 ここまでのモデルは共通で、実装によって次の点が異なります。
 
 | 軸 | 選択肢 | 決まること |
 |---|---|---|
-| 継続の表現 | スタックの断片 / ヒープ上のデータ | 再開の回数とコスト。スタックは複製しなければ安価だが 1 回限りで、データなら何回でも再開できる |
+| 操作の意味を決めるもの | 利用者のハンドラー / ランタイムの命令 | 利用者が操作の意味を定義できるか。ランタイムの命令にすると定義はできないが、継続が 1 回で終わることを前提に後始末と中断を保証できる |
+| 継続の表現 | スタックの断片 / ヒープ上のデータ / ヒープ上の可変配列 | 再開の回数とコスト。スタックは複製しなければ安価だが 1 回限りで、データなら何回でも再開できる。可変配列はスタックの深さに縛られないが、複製しないので 1 回限り |
 | ハンドラーの範囲 | Deep / Shallow | 継続にハンドラーを含むか。Deep は `handle H (k(b))` を渡し、Shallow は `k(b)` を渡す。Shallow なら次の操作の前にハンドラーを替えられる |
 | ハンドラーの探し方 | 動的（最も近いもの）/ 字句（能力） | 同じ種類のハンドラーが重なったときの呼び先 |
 | 静的検査 | 型で追跡 / 能力のスコープ / なし | ハンドラーの付け忘れを検出する時期 |
@@ -190,6 +196,8 @@ handle State(0) (handle NonDet program)  → ([(true, 0), (false, 1)], 2)       
 | 探し方 | 最も近いもの | 字句（能力） | 最も近いもの | 最も近いもの | 最も近いもの | 最も近いもの |
 | 静的検査 | あり | あり | あり | なし | あり | あり |
 | 書き方 | 直接 | 直接 | 直接 | 直接 | do 記法 | do 記法 |
+
+ZIO はハンドラーを持たないので、この表には入れていません。操作の意味はランタイムの命令が決め、継続はヒープ上の可変配列に置きます（[位置づけ](docs/zio-report.md#2-zio-の位置づけ)）。
 
 ### Algebraic Effects と Extensible Effects
 
@@ -258,7 +266,7 @@ OCaml の `perform` や Koka の `resume` の土台である限定継続が .NET
 
 Direct はスレッド間で実行権を手渡しして、同時に動くスレッドを常に 1 つに保ちます。スレッドのスタックは複製できないので、再開が 1 回に限られます。OCaml がワンショットである理由と同じ制約が、F# でも同じ形で現れます。
 
-`Async.FromContinuations` の `(ok, err, cancel)` はそのまま継続に使えます。`ok` が OCaml の `continue`、`err` が `discontinue` に当たり、2 回目の呼び出しは FSharp.Core が例外にします。
+`Async.FromContinuations` の `(ok, err, cancel)` はそのまま継続に使えます。`ok` が OCaml の `continue`、`err` が `discontinue` に当たり、2 回目の呼び出しは FSharp.Core が例外にします。`cancel` は自動では呼ばれないので、止まっている間の中断に応じるには、トークンに登録して自分で呼びます（[AsyncOneShot.fs](samples/EffectSystem.Samples/AsyncOneShot.fs) の `capture`）。
 
 ### 課題 2: 操作の答えの型を表せない
 
@@ -301,9 +309,10 @@ type Eff<'a> =
     | Pure of 'a
     | Impure of effect: obj * resume: (Result<obj, exn> -> Eff<'a>)
     | Delayed of (unit -> Eff<'a>)
+    | Bound of BindNode<'a>
 ```
 
-`resume` が `Result` を受け取るのは、値だけでなく例外でも再開するためです。`Delayed` は課題 6 で使います。
+`resume` が `Result` を受け取るのは、値だけでなく例外でも再開するためです。`Delayed` と `Bound` は課題 6 で使います。
 
 FSharpPlus の `Free<'F<'T>, 'T>` は SRTP で高カインド型を模倣する別解で、比較のため [src/EffectSystem.Plus/](src/EffectSystem.Plus/) に実装しています。
 
@@ -315,7 +324,7 @@ Koka の `<ask<a>, emit<a> | e>` はハンドラーを被せるたびに 1 つ�
 |---|---|---|---|
 | Freer 単体 | なし | `Eff.run` で実行時に `Unhandled` | |
 | Capability | 能力を値として引数で受ける | 能力がないので呼び出せない | 引数が増える。ハンドラーの外へ持ち出した能力は実行時に `Unhandled` |
-| Rio | インターフェイス制約 | FS0193 | 行は最後にまとめて閉じる。`IAsk<int>` と `IAsk<string>` を同時に要求できない |
+| Rio | インターフェイス制約 | FS0193 | 行は最後にまとめて閉じる。途中で消すには残りの行を転送クラスに列挙する。`IAsk<int>` と `IAsk<string>` を同時に要求できない |
 | RecordEnv | メンバー制約 | FS0001 | 行は最後にまとめて閉じる。環境を型変数のまま扱う関数には `inline` が要る |
 | StaticRow | 幽霊型のスロット | FS0001 | 1 段ずつ消えるが、エフェクトの追加で全シグネチャが変わる |
 
@@ -347,6 +356,8 @@ let askEmitRow (out: Log) =
 //   out: Log -> Rio<'a,unit> when 'a :> IEmit<'b> and 'a :> IAsk<'b>
 ```
 
+計算の途中で行の一部を消すときは、`Rio.provideSome` で子の計算を包み、消す能力と残りの行を転送クラスに書きます（[EffektStyle.fs](samples/EffectSystem.Samples/EffektStyle.fs) の `localAsk`）。ZIO の `provideSomeLayer[R0]` が残りの行を型引数で受けるのと同じ形です。残りは列挙するしかなく、Koka の `<ask|e>` のように開いたままにはできません（[確認](docs/zio-report.md#42-行の一部を消す)）。
+
 環境のクラスを書きたくないときは `RecordEnv` を使います。インターフェイス制約を SRTP のメンバー制約に置き換えると、レコードをそのまま環境にできます。
 
 ```fsharp
@@ -377,15 +388,21 @@ handlers {
 |> Eff.run
 ```
 
+能力の寿命も同じ形で書けます。能力を作ってスコープの終わりに解放するハンドラーを重ねると、依存の共有と逆順の解放が得られます（[EffektStyle.fs](samples/EffectSystem.Samples/EffektStyle.fs) の `scoped`）。
+
 ### 課題 6: スタックが伸びる
 
 末尾で再開するだけのハンドラーでも、素直に書くと「ハンドラー → `resume` → 次のハンドラー」と操作の回数だけ呼び出しが積まれます。F# の `.tail` 呼び出しは Debug では既定で無効で、頼れません。
 
 Freer では再開を `Delayed` で包み、`Eff.run` のループへ戻すトランポリンにしました。継続を受け取らない `Eff.fn` は、答えをその場で渡して進みます。これは自己末尾呼び出しなので、コンパイラがループにします。どちらも `Tailcalls=false` の Debug ビルドで、1 MB のスタックで 100 万回の操作が完走します。
 
-末尾の `do!` にも注意が必要です。`do! m` は末尾にあっても既定では `Bind` になるので、`do!` で再帰すると `bind` が左にネストし、全体のコストが深さの 2 乗になります。F# 10 のコンパイラは、ビルダーに `ReturnFromFinal` があれば末尾の `return!` と `do!` をそれへ脱糖します（[FS-1330](https://github.com/fsharp/fslang-design/blob/main/FSharp-10.0/FS-1330-support-tailcalls-in-computation-expressions.md)）。`m` をそのまま返すようにして、コストを深さによらないものにしました。`try` の中は末尾として扱われないので、例外の捕捉は変わりません。
+`bind` が左にネストする計算にも手当てが要ります。モデルの等式 `op(a, k) >>= f = op(a, λb. k(b) >>= f)` をそのまま再帰で書くと、再開のたびにネストをたどるので、操作 1 回のコストが深さに比例し、スタックも伸びます。そこで `bind` は節 `Bound` を作るだけにして、進めるときにループの中で右へ付け替えました（[実装](docs/zio-report.md#32-freer-への適用)）。型整列キューなしで操作 1 回のコストが深さに比例しなくなり、1 MB のスタックで深さ 100 万が完走します（[実測](docs/porting-notes.md#42-コスト)）。
 
-Direct にはこの方法が使えないので、Koka の `ctl` と `fun` の区別を持ち込みました。末尾再開と決まっている `Deep.fn` はエンジン内のループで答えを返すのでスタックが伸びません。`Deep.ctl` は `.tail` に依存し、`Tailcalls=false` では 5,000 回の操作で溢れました。[Directory.Build.props](Directory.Build.props) で `Tailcalls=true` にしているのはこのためです。
+ただし、入れ子の `try` は別です。F# の `try` は最初の区間しか覆えないので、操作のたびに全段の `try` を掛け直します。コストとスタックが入れ子の深さに比例し、1 MB のスタックでは 2 千段で溢れます。
+
+末尾の `do!` は、この節も作りません。`do! m` は末尾にあっても既定では `Bind` になるので、`do!` で再帰すると節が深さの分だけ残ります。F# 10 のコンパイラは、ビルダーに `ReturnFromFinal` があれば末尾の `return!` と `do!` をそれへ脱糖します（[FS-1330](https://github.com/fsharp/fslang-design/blob/main/FSharp-10.0/FS-1330-support-tailcalls-in-computation-expressions.md)）。`m` をそのまま返すようにして、再帰してもメモリが増えないようにしました。`try` の中は末尾として扱われないので、例外の捕捉は変わりません。
+
+Direct にはトランポリンが使えないので、Koka の `ctl` と `fun` の区別を持ち込みました。末尾再開と決まっている `Deep.fn` はエンジン内のループで答えを返すのでスタックが伸びません。`Deep.ctl` は `.tail` に依存し、`Tailcalls=false` では 5,000 回の操作で溢れました。[Directory.Build.props](Directory.Build.props) で `Tailcalls=true` にしているのはこのためです。
 
 ### 課題 7: マルチショットと可変状態
 
@@ -394,6 +411,22 @@ Direct にはこの方法が使えないので、Koka の `ctl` と `fun` の区
 - **`let mutable`:** クロージャに捕捉されると暗黙に参照セルになるので、`eff` の中で使うと再開をまたいで共有されます。分岐ごとに独立なら `[1; 1]` になる計算が `[1; 2]` になります。状態はエフェクトか引数で持ってください。
 - **`for`:** 列挙子は可変なので、そのまま使うと再開のたびに壊れます。`eff` の `For` は先に不変リストへ変換しています。そのため無限列は扱えません。
 - **`finally`:** 再開ごとに走り、再開されずに捨てられた経路では走りません。確実に走らせるには `Eff.ctlK` の `k.Discontinue` で再開します。
+
+### 課題 8: 失敗と中断を分けられない
+
+モデルの「継続を呼ばない」は、失敗の種類を区別しません。ZIO は失敗を、型に現れる予期したエラー、型に現れないプログラムの誤り（欠陥）、外から止められたこと（中断）の 3 種類に分けます（[分類](docs/zio-report.md#51-zio-の分類)）。
+
+「継続を呼ばない」形は、リソースを持つ計算では `finally` を飛ばします。
+
+| 表し方 | 失敗の型 | `finally` | サンプル |
+|---|---|---|---|
+| 継続を呼ばない | 操作の型 | 走らない | [Advanced.fs](samples/EffectSystem.Samples/Advanced.fs) の `finallySkippedWhenAbandoned` |
+| `Discontinue` で再開する | `exn` | 走る | [Advanced.fs](samples/EffectSystem.Samples/Advanced.fs) の `finallyWithDiscontinue` |
+| 計算の結果に `Result` を持つ | `'E` | 走る | [ZioStyle.fs](samples/EffectSystem.Samples/ZioStyle.fs) の `exampleEnsuring` |
+
+外から止める中断は、モデルの外にあります。F# の `Async` はトークンで中断できますが、親が終わっても子は走り続け、中断を遅らせる標準の手段がなく、同時の失敗は 1 つしか残らず、`finally` の例外は本体の例外を消します（[比較](docs/zio-report.md#62-async-との比較)）。
+
+ZIO は継続を利用者に渡さず、1 回で終わることを前提にして、これらを保証しています。同じ形を F# へ写した単一スレッドの試作でも同じ意味論が動きますが（[試作](docs/zio-report.md#63-ファイバーの試作)）、複数回の再開と、利用者が定義する操作を諦めることになります。複数回の再開とリソースの保証は両立しにくいので、本体には入れていません。
 
 このほかに踏んだ問題（FSharpPlus の `Coproduct` が実行時に落ちる件、`Async` の継続がスレッドプールへ回される件）は[移植ノート](docs/porting-notes.md)に記録しています。
 
@@ -410,8 +443,8 @@ Direct にはこの方法が使えないので、Koka の `ctl` と `fun` の区
 ```text
 Effect<'a>                     操作の宣言
  ├─ Direct       161 行        スレッドのスタックに継続を置く
- └─ Freer        153 行        ヒープ上のクロージャに継続を置く
-     ├─ Capability + Rio  57 行    型ではなく能力で操作を探す
+ └─ Freer        186 行        ヒープ上のクロージャに継続を置く
+     ├─ Capability + Rio  58 行    型ではなく能力で操作を探す
      │   └─ RecordEnv (サンプル)   レコードを環境にする
      └─ StaticRow (サンプル)       幽霊型で行を表す
 
@@ -462,7 +495,7 @@ GADT がない以上、どこかにキャストは必要です。それを `perf
 
 本番向けのライブラリではないので、次の点は実装していません。必要になれば、まずここから手を入れることになります。
 
-- Freer の左ネストの改善（型整列キュー）
+- 外からの中断とリソースの保証（複数回の再開と、利用者が定義する操作を諦めることになる。[課題 8](#課題-8-失敗と中断を分けられない)）
 - Direct のスレッドプール化と、再開されなかったファイバーの後始末
 - SRTP による行の型レベル探索（開いた行を注釈できず、コンパイル時間が行の深さに対して指数的に伸びる。[理由の詳細](docs/row-polymorphism-report.md#9-判断)）
 
@@ -484,13 +517,17 @@ Koka、Unison、Polysemy を Freer へ写すと、行多相がないので検査
 | アプリケーションの既定 | Capability + Rio | ハンドラーの付け忘れがコンパイルエラーになる。マルチショットも使える | Effekt | Capability は約 130 ns、Rio は約 170 ns |
 | Rio の環境のクラスを書きたくない | RecordEnv | レコードをそのまま環境にできる。操作だけを `inline` にして、組み上げた計算は名前付きレコードで閉じる | Effekt | 約 170 ns（Rio と同じ） |
 | 継続を直接扱うライブラリ、学習 | Freer | Koka / Unison / Polysemy の書き方をすべて写せる | Koka / Unison / Polysemy | `fn` は約 60 ns、`ctl` は約 130 ns |
-| 既存の `async` コードに組み込む | Async one-shot | FSharp.Core だけで書け、タスクごとにスレッドを消費しない | OCaml の意味論 | 約 220 ns（最速経路の値） |
-| 関数の色を変えられない、OCaml の例をそのまま動かしたい | Direct | 普通の関数のまま `perform` できる唯一の方式。ファイバーごとにスレッドを 1 本使う | OCaml | 約 400〜600 ns（生成は約 80 µs） |
+| 既存の `async` コードに組み込む | Async one-shot | FSharp.Core だけで書け、タスクごとにスレッドを消費しない | OCaml の意味論 | 約 350 ns（最速経路の値） |
+| 関数の色を変えられない、OCaml の例をそのまま動かしたい | Direct | 普通の関数のまま `perform` できる唯一の方式。ファイバーごとにスレッドを 1 本使う | OCaml | 約 400〜500 ns（生成は約 80 µs） |
 | すでに FSharpPlus を使っていて、変換子へ解釈したい | FSharpPlus Free | `Free.fold` で任意のモナドへ畳み込める。それ以外では勧めない（[理由](docs/porting-notes.md#5-fsharpplus-を使うか)） | PureScript Run | 同じ条件で測っていない |
 
 測定の条件と幅は[移植ノート](docs/porting-notes.md#42-コスト)にあります。
 
-Capability でも、末尾で 1 回再開するだけの操作なら `shift` は要りません。能力のメソッドで `Eff.ret` を返せば継続を取り出さずに済み、`reset` もなくせます。コストは約 30 ns まで下がります（[EffektStyle.fs](samples/EffectSystem.Samples/EffektStyle.fs) の `askHandlerDirect`）。ただし区切りがなくなるので、ハンドラーの外へ持ち出した能力は `Unhandled` にならず、そのまま答えを返します。
+Capability でも、末尾で 1 回再開するだけの操作なら `shift` は要りません。能力のメソッドで `Eff.ret` を返せば継続を取り出さずに済み、`reset` もなくせます。コストは約 25 ns まで下がります（[EffektStyle.fs](samples/EffectSystem.Samples/EffektStyle.fs) の `askHandlerDirect`）。ただし区切りがなくなるので、ハンドラーの外へ持ち出した能力は `Unhandled` にならず、そのまま答えを返します。
+
+### 何を行に載せるか
+
+行に載せる価値があるのは、局所的で、消す演算子があり、型で追う意味があるものです。トランザクションやリクエストの文脈が当たります。サービスの実装が使う依存はコンストラクターで渡し、時刻やログのようにどこでも使う低レベルのものは載せません。ZIO も実際の使用からこの基準に落ち着いています（[根拠](docs/zio-report.md#43-何を行に載せるか)）。
 
 ## 構成
 
@@ -505,6 +542,7 @@ Capability でも、末尾で 1 回再開するだけの操作なら `shift` は
 | [tests/compile-fail/](tests/compile-fail/) | コンパイルエラーになることを確かめるスクリプトと対照群 |
 | [docs/porting-notes.md](docs/porting-notes.md) | 元資料の読解、エンジンごとの実装、各言語との対応、実測値、制限 |
 | [docs/row-polymorphism-report.md](docs/row-polymorphism-report.md) | SRTP で行多相をどこまで模倣できるかの検証 |
+| [docs/zio-report.md](docs/zio-report.md) | Scala の ZIO とモデルの対応、F# のコードに活用できるものの検証 |
 | [docs/figures/](docs/figures/) | この README の図（手書きの SVG） |
 | [scripts/build-docs.fsx](scripts/build-docs.fsx) | fsdocs でサイトを生成するスクリプト。テンプレートは [docs/_template.html](docs/_template.html) |
 
@@ -513,16 +551,17 @@ Capability でも、末尾で 1 回再開するだけの操作なら `shift` は
 | ファイル | 内容 | エンジン |
 |---|---|---|
 | [KokaStyle.fs](samples/EffectSystem.Samples/KokaStyle.fs) | Koka の写し | Freer |
-| [EffektStyle.fs](samples/EffectSystem.Samples/EffektStyle.fs) | Effekt の写し、字句スコープ、Rio | Capability |
+| [EffektStyle.fs](samples/EffectSystem.Samples/EffektStyle.fs) | Effekt の写し、字句スコープ、Rio、行の局所処理、能力の寿命 | Capability |
 | [UnisonStyle.fs](samples/EffectSystem.Samples/UnisonStyle.fs) | Unison の写し | Freer の `view` |
 | [OCamlStyle.fs](samples/EffectSystem.Samples/OCamlStyle.fs) | 記事の OCaml の写し | Direct |
 | [OCamlManual.fs](samples/EffectSystem.Samples/OCamlManual.fs) | マニュアル 12.24 の全例 | Direct |
 | [PolysemyStyle.fs](samples/EffectSystem.Samples/PolysemyStyle.fs) | Polysemy の写し | Freer の `interpret` |
 | [PureScriptStyle.fs](samples/EffectSystem.Samples/PureScriptStyle.fs) | PureScript Run の写し | FSharpPlus Free |
-| [AsyncOneShot.fs](samples/EffectSystem.Samples/AsyncOneShot.fs) | `Async` の継続で書いたスケジューラー | `Async.FromContinuations` |
+| [AsyncOneShot.fs](samples/EffectSystem.Samples/AsyncOneShot.fs) | `Async` の継続で書いたスケジューラー、止まっている間の中断 | `Async.FromContinuations` |
 | [StaticRow.fs](samples/EffectSystem.Samples/StaticRow.fs) | 行を 1 段ずつ消す幽霊型 | Freer |
 | [RecordEnv.fs](samples/EffectSystem.Samples/RecordEnv.fs) | レコードを環境にするメンバー制約 | Capability |
-| [Advanced.fs](samples/EffectSystem.Samples/Advanced.fs) | State と NonDet、ジェネレーター、`finally` | Freer |
+| [Advanced.fs](samples/EffectSystem.Samples/Advanced.fs) | State と NonDet、ジェネレーター、`finally`、トランザクション | Freer |
+| [ZioStyle.fs](samples/EffectSystem.Samples/ZioStyle.fs) | ZIO の失敗の型 `E` の写し | Freer |
 | [Bench.fs](samples/EffectSystem.Samples/Bench.fs) | コストとスタックの計測 | すべて |
 
 ## 参考文献
@@ -534,8 +573,10 @@ Capability でも、末尾で 1 回再開するだけの操作なら `shift` は
 - Plotkin, Pretnar, [Handlers of Algebraic Effects](https://bibtex.github.io/ESOP-2009-PlotkinP.html), ESOP 2009
 - Brachthäuser, Schuster, Ostermann, [Effects as Capabilities](https://publikationen.uni-tuebingen.de/xmlui/handle/10900/123811), OOPSLA 2020
 - [F# RFC FS-1330: Support tailcalls in computation expressions](https://github.com/fsharp/fslang-design/blob/main/FSharp-10.0/FS-1330-support-tailcalls-in-computation-expressions.md)
+- [ZIO のドキュメント](https://zio.dev/overview/summary)
+- F# の先行例: [Orsak](https://github.com/JohSand/Orsak)（`Effect<'r, 'a, 'e>`）、[FIO](https://github.com/fs-fio/FIO)（ファイバーの実行系）。どちらも動かして評価はしていません
 
-実装の確認に使ったソースコードと、その他の論文は[移植ノートの参考文献](docs/porting-notes.md#参考文献)にあります。
+実装の確認に使ったソースコードと、その他の論文は[移植ノートの参考文献](docs/porting-notes.md#参考文献)に、ZIO の詳しい出典は[検証レポートの参考文献](docs/zio-report.md#参考文献)にあります。
 
 ## ライセンス
 

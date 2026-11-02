@@ -24,7 +24,8 @@ let projects =
 let pages =
     [ "README.md", "index.md", 1
       "docs/porting-notes.md", "porting-notes.md", 2
-      "docs/row-polymorphism-report.md", "row-polymorphism-report.md", 3 ]
+      "docs/row-polymorphism-report.md", "row-polymorphism-report.md", 3
+      "docs/zio-report.md", "zio-report.md", 4 ]
 
 /// ソースへのリンクの行き先。ソースはサイトにないので、対応する API ドキュメントのページへ向ける。
 let apiPage (path: string) =

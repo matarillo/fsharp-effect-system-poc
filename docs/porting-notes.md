@@ -67,6 +67,7 @@ let rec private deep retc cases m =
     match m with
     | Pure x -> retc x
     | Delayed th -> deep retc cases (th ())
+    | Bound n -> deep retc cases (n.Step())
     | Impure(e, k) ->
         match findCase cases e with
         // 扱わない操作は外側へ転送する。
@@ -78,6 +79,8 @@ let rec private deep retc cases m =
 ```
 
 継続 `k` はヒープ上の関数なので、何度でも呼べる。再開を `Delayed` で包むのは `.tail` に頼らずスタックを伸ばさないためである。`Eff.fn` の経路は自己末尾呼び出しなので、コンパイラがループにする。Debug かつ `Tailcalls=false` でも、どちらの経路でも 100 万回の操作が通ることを確認した（4.3 節）。
+
+`Bound` は `bind` が作る節で、前の計算を進めずに持つ。進めるのはこのループと `Eff.run` のループで、節が左にネストしていれば、進めるときに右へ付け替える。実装は[ZIO の検証の 3.2 節](zio-report.md#32-freer-への適用)にある。
 
 3 言語の書き方をすべて写せる。
 
@@ -184,7 +187,7 @@ error FS0193: 型 'Env' は型 'IEmit<'a>' と互換性がありません
 
 制限が 2 つある。
 
-- **行を 1 段ずつ消せない。** 環境は最後にまとめて具体クラスとして与える。`AppEnv` のように能力の数だけ転送を書く。
+- **行を 1 段ずつ消せない。** 環境は最後にまとめて具体クラスとして与える。`AppEnv` のように能力の数だけ転送を書く。計算の途中で消すには、残りの行を列挙した転送クラスを `Rio.provideSome` に渡す（[ZIO の検証の 4.2 節](zio-report.md#42-行の一部を消す)）。
 - **同じジェネリックインターフェイスの別インスタンスを同時に要求できない。** `IAsk<int>` と `IAsk<string>` を同じ `'R` に要求すると、F# の推論が 1 つに単一化して FS0001 になる。`IAskAge` と `IAskName` のように名前を分ければ通る。
 
 **RecordEnv**
@@ -243,9 +246,32 @@ error FS0001: 型が一致しません。
 
 `Async.FromContinuations` の `(ok, err, cancel)` と OCaml の継続の対応は README の[課題 1](../README.md#課題-1-継続を取り出す手段がない)のとおりである。`err` で再開すると `try ... finally` が走り、2 回目の再開は FSharp.Core の検査で `InvalidOperationException` になる。
 
+`cancel` は自動では呼ばれない。呼ばなければ、止まっている計算は `Cancel` に応じず、`finally` も走らない。`capture` はトークンに登録して自分で呼び、再開と中断のうち先に来たほうだけを通す。中断の後に残った再開は何も起こさない。
+
 ```fsharp
 let capture (f: Continuation<'a> -> unit) : Async<'a> =
-    Async.FromContinuations(fun (ok, err, _) -> f { Resume = ok; Discontinue = err })
+    async {
+        let! token = Async.CancellationToken
+
+        return!
+            Async.FromContinuations(fun (ok, err, cancel) ->
+                let state = ref CaptureState.Parked
+                let registration = ref Unchecked.defaultof<CancellationTokenRegistration>
+
+                // 2 回目の再開は ok と err がそのまま拒否する。
+                let resumeWith (continuation: 'x -> unit) (x: 'x) =
+                    if Interlocked.CompareExchange(&state.contents, CaptureState.Resumed, CaptureState.Parked) <> CaptureState.Cancelled then
+                        registration.Value.Unregister() |> ignore
+                        continuation x
+
+                registration.Value <-
+                    token.Register(fun () ->
+                        if Interlocked.CompareExchange(&state.contents, CaptureState.Cancelled, CaptureState.Parked) = CaptureState.Parked then
+                            cancel (OperationCanceledException token))
+
+                if state.Value = CaptureState.Parked then
+                    f { Resume = resumeWith ok; Discontinue = resumeWith err })
+    }
 ```
 
 マニュアル 24.3 のスケジューラーが、キューを回すスレッド 1 本だけで動き、出力の順序も一致する（[AsyncOneShot.fs](../samples/EffectSystem.Samples/AsyncOneShot.fs)）。操作は `Scheduler` のメソッドなので、スコープの仕組みは能力渡しと同じである。
@@ -309,33 +335,43 @@ let rec runAsk (value: 'v) (m: Free<AskEmitLogF<'v, unit>, unit>) : Free<EmitLog
 | エンジン | 全コア | 1 コア固定 |
 |---|---|---:|
 | インターフェイス呼び出し（基準、JIT に最適化されている可能性あり） | 0.2 ns | 0.2 ns |
-| Capability、`Eff.ret` で答える | 25–31 ns | 25 ns |
-| RecordEnv、`Eff.ret` で答える | 56–74 ns | 60 ns |
-| Freer + `fn` | 57–59 ns | 111 ns |
-| Rio、`Eff.ret` で答える | 59–75 ns | 96 ns |
-| FSharpPlus Free | 92–111 ns | 120 ns |
-| Freer + `ctl` | 121–133 ns | 175 ns |
-| Capability、`shift` で答える | 124–140 ns | 202 ns |
-| RecordEnv、`shift` で答える | 153–181 ns | 195 ns |
-| Rio、`shift` で答える | 154–185 ns | 203 ns |
-| Async one-shot | 213–227 ns | 252 ns |
-| Direct + `fn` | 374–468 ns | 1,812 ns |
-| Direct + `ctl` | 455–577 ns | 1,852 ns |
-| Direct のファイバー生成と終了 | 75–95 µs | 82 µs |
-| Freer、左ネスト深さ 1,000 | 21.3–24.9 µs | 20.4 µs |
-| Freer、左ネスト深さ 4,000 | 93.9–113.9 µs | 93.8 µs |
-| Freer、末尾の `do!` の再帰、深さ 1,000 | 122–182 ns | 143 ns |
-| Freer、末尾の `do!` の再帰、深さ 4,000 | 128–181 ns | 146 ns |
+| Capability、`Eff.ret` で答える | 22–23 ns | 22 ns |
+| RecordEnv、`Eff.ret` で答える | 59 ns | 80 ns |
+| Freer + `fn` | 58–59 ns | 107 ns |
+| Rio、`Eff.ret` で答える | 59–62 ns | 86 ns |
+| FSharpPlus Free | 88–89 ns | 169 ns |
+| Rio に `'E` を足した `Zio`、`Eff.ret` で答える | 107–110 ns | 202 ns |
+| Freer + `ctl` | 125–136 ns | 170 ns |
+| Capability、`shift` で答える | 124–143 ns | 203 ns |
+| RecordEnv、`shift` で答える | 165–178 ns | 178 ns |
+| Rio、`shift` で答える | 165–172 ns | 189 ns |
+| Async one-shot | 344–349 ns | 345 ns |
+| Direct + `fn` | 379–454 ns | 1,774 ns |
+| Direct + `ctl` | 462–497 ns | 1,775 ns |
+| Direct のファイバー生成と終了 | 75–87 µs | 95 µs |
+| Freer、左ネスト深さ 1,000 | 198–203 ns | 230 ns |
+| Freer、左ネスト深さ 4,000 | 203–273 ns | 224 ns |
+| Freer、左ネスト深さ 256,000 | 460–513 ns | 527 ns |
+| Freer、`bind` を遅延なしで左へ積む（fold）、深さ 4,000 | 154–173 ns | 201 ns |
+| Freer、観測と `bind` を交互に重ねる、深さ 4,000 | 377–390 ns | 502 ns |
+| Freer、観測と `bind` を交互に重ねる、深さ 256,000 | 981–1,055 ns | 1,186 ns |
+| Freer、各段に `try` がある左ネスト、深さ 250 | 22.3–23.8 µs | 24.3 µs |
+| Freer、各段に `try` がある左ネスト、深さ 1,000 | 63.4–68.6 µs | 105.7 µs |
+| Freer、末尾の `do!` の再帰、深さ 1,000 | 114–119 ns | 154 ns |
+| Freer、末尾の `do!` の再帰、深さ 4,000 | 116–122 ns | 150 ns |
 
 読み取れることは次のとおり。
 
-- **Direct の切り替えは予想より速いが、生成は重い。** 全コアで約 400〜600 ns なのは、`SemaphoreSlim` のスピン待ちで済んでいるためと考えられる（推定）。1 コアでは約 4 倍になる。一方、スレッドを作るファイバーの生成は約 80 µs かかるので、タスクを大量に作る用途には向かない。
-- **Async one-shot の数字は最も速い経路のものである。** このベンチマークは継続をコールバックの中で同期的に再開している。スケジューラーのように後から再開する場合は、これより遅くなると考えられる（未測定）。
+- **Direct の切り替えは予想より速いが、生成は重い。** 全コアで約 400〜500 ns なのは、`SemaphoreSlim` のスピン待ちで済んでいるためと考えられる（推定）。1 コアでは約 4 倍になる。一方、スレッドを作るファイバーの生成は約 80 µs かかるので、タスクを大量に作る用途には向かない。
+- **Async one-shot の数字は最も速い経路のものである。** このベンチマークは継続をコールバックの中で同期的に再開していて、値はトークンへの登録を含む（2.5 節）。スケジューラーのように後から再開する場合は、これより遅くなると考えられる（未測定）。
 - **`fn` は `ctl` の約半分で済む。** `fn` は継続のクロージャと `Delayed` を作らず、答えをその場で渡すからである。記事によれば Koka でも `fun` のほうが効率的で、同じ方向の差がこの実装でも出ている。
 - **末尾で 1 回再開するだけの能力に `shift` は要らない。** `Eff.ret` で答えると継続を取り出さないので、コストが約 5 分の 1 になる（2.3 節）。
-- **環境を挟むと Capability より遅くなる。** Rio は `shift` で約 1.3 倍、`Eff.ret` で約 2.4 倍かかる。RecordEnv は Rio と差がない。メンバー制約はコンパイル時に解決されるからである。
+- **環境を挟むと Capability より遅くなる。** Rio は `shift` で約 1.3 倍、`Eff.ret` で約 2.7 倍かかる。RecordEnv は Rio と差がない。メンバー制約はコンパイル時に解決されるからである。
+- **失敗の型を足すと Rio より約 50 ns 遅くなる。** `Zio` は `bind` ごとに `Result` を作る（[ZioStyle.fs](../samples/EffectSystem.Samples/ZioStyle.fs)）。
 - **FSharpPlus Free の数字は同じ条件ではない。** このベンチマークはハンドラーの型による検索も遅延の足場も持たない、1 エフェクト専用の手書きループである。速さの比較に使わないこと。
-- **Freer は左ネストに弱い。** 深さを 4 倍にすると操作あたりのコストが約 4.5 倍になるので、全体は深さの 2 乗に近い。Kiselyov と Ishii の論文は[継続を型整列キューで持つ](https://tagteam.harvard.edu/hub_feeds/1936/feed_items/2126301)ことでこれを解決するが、この実装には入れていない。末尾の `do!` で再帰する形だけは、`ReturnFromFinal` が `bind` を通らないので、コストが深さに比例しない。
+- **Freer の左ネストのコストは深さに比例しない。** `bind` は節を作るだけで、進めるときに右へ付け替える（2.1 節）。深さを 256 倍にしても、操作あたりのコストは約 2.5 倍に収まる。観測と `bind` を交互に重ねる形も、深さを 64 倍にして約 2.7 倍である。伸び方の内訳は[ZIO の検証の 8.1 節](zio-report.md#81-freer-の-bind)にある。Kiselyov と Ishii の論文は[継続を型整列キューで持つ](https://tagteam.harvard.edu/hub_feeds/1936/feed_items/2126301)ことで同じ問題を解決するが、この実装はキューを持たない。
+- **入れ子の `try` は別である。** 操作が全段の `try` を通るので、コストが入れ子の深さに比例する。深さを 4 倍にすると約 3 倍になる。
+- **末尾の `do!` は節を作らない。** `ReturnFromFinal` が `bind` を通らないので、再帰してもメモリが増えない。最後の操作の時点で生きているメモリは、深さ 1 段あたり末尾の `do!` で 0 バイト、末尾でない `do!` で 120 バイトである（深さ 10 万と 100 万で同じ値。リポジトリのコマンドにはない測定で、割り当ての差はテストで固定している）。
 
 ### 4.3 スタック
 
@@ -347,12 +383,15 @@ let rec runAsk (value: 'v) (m: Free<AskEmitLogF<'v, unit>, unit>) : Free<EmitLog
 | Freer + `fn` | 100 万○ | 100 万○ | 100 万○ |
 | Freer + `ctl`、末尾再開 | 100 万○ | 100 万○ | 100 万○ |
 | Freer、末尾の `do!` の再帰 | 100 万○ | 100 万○ | 100 万○ |
-| Freer、左ネスト | 2 万○ / 10 万× | 5 千○ / 2 万× | 5 千○ / 2 万× |
+| Freer、左ネスト | 100 万○ | 100 万○ | 100 万○ |
+| Freer、`bind` を遅延なしで左へ積む（fold） | 100 万○ | 100 万○ | 100 万○ |
+| Freer、観測と `bind` を交互に重ねる | 100 万○ | 100 万○ | 100 万○ |
+| Freer、各段に `try` がある左ネスト | 千○ / 2 千× | 千○ / 2 千× | 千○ / 2 千× |
 | Direct + `fn` | 10 万○ | 10 万○ | 10 万○ |
 | Direct + `ctl` | 10 万○ | 10 万○ | 千○ / 5 千× |
 
-- Freer の `fn`、末尾再開、末尾の `do!` は `.tail` に依存しない。
-- Freer の左ネストの限界は、通常の非末尾再帰と同じ桁である。直接スタイルの再帰でも同じ制約があるので、Freer 固有の欠点とまでは言えない。
+- Freer の `fn`、末尾再開、末尾の `do!`、左ネストは `.tail` に依存しない。
+- 入れ子の `try` は、再開のたびに全段の `try` の中を呼び出すので、段数の分だけスタックを使う。`.tail` では消えない。
 - Direct + `ctl` は `.tail` に依存する。`Tailcalls=true` を [Directory.Build.props](../Directory.Build.props) に入れているのはこのためである。
 
 ## 5. FSharpPlus を使うか
@@ -391,7 +430,7 @@ let rec runAsk (value: 'v) (m: Free<AskEmitLogF<'v, unit>, unit>) : Free<EmitLog
 
 - 6 言語の処理系は実行していない。比較の対象は記事とマニュアルに掲載された出力で、README の図3の位置づけもこれらとソースの記述による。
 - Polysemy と Run の継続の扱いはソースを読んで確認したもので、Haskell と PureScript では実行していない。図3で両者を「何回でも」に置いたのはこの結果による。
-- 105 件のテストは Debug と Release の両方で通っている。コンパイルエラーの検証は `dotnet fsi` で行い、通るスクリプトを対照群として並べて、失敗の理由が狙いどおりであることを確かめている。
+- 149 件のテストは Debug と Release の両方で通っている。コンパイルエラーの検証は `dotnet fsi` で行い、通るスクリプトを対照群として並べて、失敗の理由が狙いどおりであることを確かめている。
 - SRTP で行を型レベルのリストとして探索する方式は採用していない。開いた行を注釈できず（FS0043）、コンパイル時間が行の深さに対して指数的に伸びる（[検証レポート](row-polymorphism-report.md#9-判断)）。
 
 ## 参考文献
