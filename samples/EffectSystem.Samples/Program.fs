@@ -73,6 +73,8 @@ let private showAll () =
     section "トランザクション: 重ねる" Advanced.transactionNested
     attempt "トランザクション: rollback" Advanced.transactionRollsBack
 
+    section "ZIO の E: 失敗でも後始末が走る" ZioStyle.exampleEnsuring
+
 /// <summary>エントリーポイント。</summary>
 /// <remarks>
 /// 引数なしですべての例を実行する。<c>bench</c> でコストを測り、<c>limit エンジン名 回数</c> でスタックの限界を調べる。

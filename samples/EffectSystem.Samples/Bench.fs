@@ -16,6 +16,7 @@ open EffectSystem.Direct
 open EffectSystem.Freer
 open EffectSystem.Capability
 open EffectSystem.Samples.Effects
+open EffectSystem.Samples.ZioStyle
 
 /// <summary>基準として測るインターフェイス呼び出し。</summary>
 type ITick =
@@ -222,6 +223,29 @@ let private rioRet (n: int) =
             member _.Ask() = Eff.ret 1 }
     |> Eff.run
 
+/// <summary>失敗の型 <c>'E</c> を持つ計算で n 回操作する。環境はインターフェイスで受ける。</summary>
+let rec private zioBody (remaining: int) (sum: int) : Zio<EffektStyle.IAsk<int>, string, int> =
+    zio {
+        if remaining = 0 then
+            return sum
+        else
+            let! v = Zio.access (fun (env: EffektStyle.IAsk<int>) -> env.Ask())
+            return! zioBody (remaining - 1) (sum + v)
+    }
+
+/// <summary>失敗の型 <c>'E</c> を持つ計算を、継続を取り出さずに答える能力で測る。</summary>
+let private zioRet (n: int) =
+    let result =
+        zioBody n 0
+        |> Zio.run
+            { new EffektStyle.IAsk<int> with
+                member _.Ask() = Eff.ret 1 }
+        |> Eff.run
+
+    match result with
+    | Ok v -> v
+    | Error e -> failwith e
+
 /// <summary>レコードの環境で n 回操作する計算。環境は匿名レコードで閉じる。</summary>
 let rec private recordBody (remaining: int) (sum: int) : Rio<{| Ask: EffektStyle.IAsk<int> |}, int> =
     rio {
@@ -304,6 +328,7 @@ let run () =
     measure "Capability (Eff.ret)" 2_000_000 capabilityRet
     measure "Rio (reset/shift)" 2_000_000 rioShift
     measure "Rio (Eff.ret)" 2_000_000 rioRet
+    measure "Zio (Eff.ret)" 2_000_000 zioRet
     measure "RecordEnv (reset/shift)" 2_000_000 recordShift
     measure "RecordEnv (Eff.ret)" 2_000_000 recordRet
     measure "FSharpPlus Free (Free.run)" 1_000_000 fsharpPlusFree

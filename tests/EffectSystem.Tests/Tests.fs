@@ -1050,6 +1050,48 @@ let asyncOneShot =
           testCase "2 回の再開は FSharp.Core が拒否する"
           <| fun () -> Expect.throwsT<InvalidOperationException> AsyncOneShot.resumeTwice "" ]
 
+open EffectSystem.Samples.ZioStyle
+
+let zioStyle =
+    testList
+        "ZIO の E"
+        [ testCase "失敗で抜けても後始末が走る"
+          <| fun () -> Expect.equal (capture exampleEnsuring) [ "release"; "failed: boom" ] ""
+
+          testCase "失敗しない計算はどの失敗の型にも合う"
+          <| fun () ->
+              let asString: Zio<unit, string, int> = never ()
+              let asInt: Zio<unit, int, int> = never ()
+              Expect.equal (asString |> Zio.run () |> Eff.run) (Ok 1) "string"
+              Expect.equal (asInt |> Zio.run () |> Eff.run) (Ok 1) "int"
+
+          testCase "mapError で揃えた失敗の型を、それぞれの失敗が通る"
+          <| fun () ->
+              let order (sku: string) = placeOrder sku |> Zio.run () |> Eff.run
+
+              Expect.equal (order "mug") (Ok "receipt 3") "成功"
+              Expect.equal (order "") (Error(Stock OutOfStock)) "在庫"
+              Expect.equal (order (String('x', 101))) (Error(Payment Declined)) "支払い"
+
+          testCase "catchAll で失敗の型を消す"
+          <| fun () ->
+              let recovered: Zio<unit, PaymentError, int> = reserveOrZero ""
+              Expect.equal (recovered |> Zio.run () |> Eff.run) (Ok 0) ""
+
+          testCase "環境の能力を呼べる"
+          <| fun () ->
+              let env =
+                  { new EffektStyle.IAsk<int> with
+                      member _.Ask() = Eff.ret 2 }
+
+              let body: Zio<EffektStyle.IAsk<int>, string, int> =
+                  zio {
+                      let! v = Zio.access (fun (e: EffektStyle.IAsk<int>) -> e.Ask())
+                      return v + 1
+                  }
+
+              Expect.equal (body |> Zio.run env |> Eff.run) (Ok 3) "" ]
+
 /// 記事の「継続は暗黙で 1 回だけ」が API の性質であることを、同じエンコーディングで確かめる。
 let runEncoding =
     testList
@@ -1190,7 +1232,11 @@ let staticSafety =
           shouldCompile "rio-abstract-member.fsx"
           shouldReject "record-abstract-member.fsx" "FS0670" "^R"
           shouldReject "record-extension-member.fsx" "FS0193" "get_Ask"
-          shouldReject "record-rank2.fsx" "FS0001" "Extra" ]
+          shouldReject "record-rank2.fsx" "FS0001" "Extra"
+          shouldCompile "zio-map-error.fsx"
+          shouldReject "zio-error-mismatch.fsx" "FS0001" "PaymentError"
+          shouldCompile "zio-never-function.fsx"
+          shouldReject "zio-never-value.fsx" "FS0001" "int" ]
 
 [<EntryPoint>]
 let main argv =
@@ -1204,6 +1250,7 @@ let main argv =
           staticRow
           recordEnv
           asyncOneShot
+          zioStyle
           runEncoding
           fsharpPlusBehaviour
           staticSafety ]
