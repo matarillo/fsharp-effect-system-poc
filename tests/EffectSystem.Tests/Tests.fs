@@ -1234,6 +1234,35 @@ let zioStyle =
               let recovered: Zio<unit, PaymentError, int> = reserveOrZero ""
               Expect.equal (recovered |> Zio.run () |> Eff.run) (Ok 0) ""
 
+          testCase "and! は両方を実行し、両方の失敗を + で合わせる"
+          <| fun () ->
+              let check sku quantity =
+                  checkLine sku quantity |> Zio.run () |> Eff.run
+
+              Expect.equal (check "" 0) (Error(Problems [ "sku is empty"; "quantity must be positive" ])) "両方"
+              Expect.equal (check "mug" 0) (Error(Problems [ "quantity must be positive" ])) "片方"
+              Expect.equal (check "mug" 2) (Ok("mug", 2)) "成功"
+
+          testCase "and! は前の失敗の後も、後の計算を実行する"
+          <| fun () ->
+              let log = ResizeArray<string>()
+
+              let step (name: string) : Zio<unit, Problems, unit> =
+                  zio {
+                      log.Add name
+                      return! Zio.fail (Problems [ name ])
+                  }
+
+              let both =
+                  zio {
+                      let! () = step "A"
+                      and! () = step "B"
+                      return ()
+                  }
+
+              Expect.equal (both |> Zio.run () |> Eff.run) (Error(Problems [ "A"; "B" ])) ""
+              Expect.equal (List.ofSeq log) [ "A"; "B" ] "順に実行される"
+
           testCase "環境の能力を呼べる"
           <| fun () ->
               let env =
@@ -1392,7 +1421,9 @@ let staticSafety =
           shouldCompile "zio-map-error.fsx"
           shouldReject "zio-error-mismatch.fsx" "FS0001" "PaymentError"
           shouldCompile "zio-never-function.fsx"
-          shouldReject "zio-never-value.fsx" "FS0001" "int" ]
+          shouldReject "zio-never-value.fsx" "FS0001" "int"
+          shouldCompile "zio-validate.fsx"
+          shouldReject "zio-validate-without-plus.fsx" "FS0001" "StockError" ]
 
 [<EntryPoint>]
 let main argv =

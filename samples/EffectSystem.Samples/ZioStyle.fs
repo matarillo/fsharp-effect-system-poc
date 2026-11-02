@@ -3,6 +3,7 @@
 /// <para>
 /// 失敗を値として計算の中を戻すので、<c>finally</c> の区間を通る。継続を捨てる失敗と違い、後始末が走る。
 /// 型に現れる部分は <c>Rio</c> と同じ構造で、F# に変性がないので <c>'E</c> は自動では広がらない。
+/// 両方の失敗を残す <c>and!</c> は、Orsak に倣って失敗の型の <c>+</c> で 1 つに合わせる。
 /// </para>
 /// <para>
 /// 本体には入れていない。<c>bind</c> ごとに <c>Result</c> を作るので、操作 1 回が <c>Rio</c> より遅くなる（<c>bench</c> の <c>Zio (Eff.ret)</c>）。
@@ -59,6 +60,29 @@ module Zio =
     /// <summary>失敗の型を変える。ZIO の <c>mapError</c> に当たる。</summary>
     let mapError (f: 'E -> 'E2) (m: Zio<'R, 'E, 'a>) : Zio<'R, 'E2, 'a> = catchAll (f >> fail) m
 
+    /// <summary>両方の計算を順に実行し、両方が失敗したら失敗を <c>+</c> で合わせる。ZIO の <c>validate</c> に当たる。</summary>
+    /// <remarks>
+    /// <para>
+    /// <c>bind</c> と違い、前の計算が失敗しても後の計算を実行する。
+    /// ZIO は 2 つの失敗を <c>Cause</c> に残すので <c>E</c> に条件がないが、ここでは失敗のスロットが 1 つなので、
+    /// 失敗の型に <c>+</c> を求めて 1 つの値に合わせる。これは Orsak の <c>and!</c> と同じ解決である。
+    /// </para>
+    /// <para>Orsak は 2 つの計算を同時に始めるが、Freer の上では順に実行する。</para>
+    /// </remarks>
+    /// <param name="m1">前の計算。</param>
+    /// <param name="m2">後の計算。</param>
+    let inline validate (m1: Zio<'R, ^E, 'a>) (m2: Zio<'R, ^E, 'b>) : Zio<'R, ^E, 'a * 'b> =
+        Zio(fun env ->
+            run env m1
+            |> Eff.bind (fun r1 ->
+                run env m2
+                |> Eff.map (fun r2 ->
+                    match r1, r2 with
+                    | Ok a, Ok b -> Ok(a, b)
+                    | Error e, Ok _
+                    | Ok _, Error e -> Error e
+                    | Error e1, Error e2 -> Error(e1 + e2))))
+
     /// <summary>成功でも失敗でも後始末を走らせる。ZIO の <c>ensuring</c> に当たる。</summary>
     let ensuring (fin: unit -> unit) (m: Zio<'R, 'E, 'a>) : Zio<'R, 'E, 'a> =
         Zio(fun env ->
@@ -82,6 +106,9 @@ module Zio =
 
         /// <summary><c>let! x = m</c></summary>
         member _.Bind(m: Zio<'R, 'E, 'a>, f: 'a -> Zio<'R, 'E, 'b>) : Zio<'R, 'E, 'b> = bind f m
+
+        /// <summary><c>let! x = m1 and! y = m2</c>。<c>Zio.validate</c> で両方を実行する。</summary>
+        member inline _.MergeSources(m1: Zio<'R, ^E, 'a>, m2: Zio<'R, ^E, 'b>) : Zio<'R, ^E, 'a * 'b> = validate m1 m2
 
         /// <summary>値を返さない本体。</summary>
         member _.Zero() : Zio<'R, 'E, unit> = succeed ()
@@ -167,3 +194,53 @@ let placeOrder (sku: string) =
 /// <param name="sku">商品。</param>
 let reserveOrZero (sku: string) =
     reserve sku |> Zio.catchAll (fun _ -> Zio.succeed 0)
+
+/// <summary>入力の誤りの一覧。<c>+</c> で合わせられるので、<c>and!</c> の失敗の型に使える。</summary>
+type Problems =
+    /// <summary>誤りの説明の一覧。</summary>
+    | Problems of string list
+
+    /// <summary>2 つの一覧をつなげる。</summary>
+    static member (+)(Problems a, Problems b) = Problems(a @ b)
+
+/// <summary>商品の指定を確かめる。</summary>
+/// <param name="sku">商品。空なら失敗する。</param>
+let checkSku (sku: string) =
+    zio {
+        if sku = "" then
+            return! Zio.fail (Problems [ "sku is empty" ])
+        else
+            return sku
+    }
+
+/// <summary>数量を確かめる。</summary>
+/// <param name="quantity">数量。正でなければ失敗する。</param>
+let checkQuantity (quantity: int) =
+    zio {
+        if quantity <= 0 then
+            return! Zio.fail (Problems [ "quantity must be positive" ])
+        else
+            return quantity
+    }
+
+/// <summary>注文の行を確かめる。<c>and!</c> で両方を実行するので、誤りがすべて揃う。</summary>
+/// <remarks>
+/// Orsak のドキュメントの Errors の例と同じ形である。
+/// <code lang="fsharp"><![CDATA[
+/// // Orsak
+/// let checkLine sku quantity = eff {
+///     let! sku = checkSku sku
+///     and! quantity = checkQuantity quantity
+///     return sku, quantity
+/// }
+/// ]]></code>
+/// <c>let!</c> で書くと、最初の誤りで止まる。
+/// </remarks>
+/// <param name="sku">商品。</param>
+/// <param name="quantity">数量。</param>
+let checkLine (sku: string) (quantity: int) =
+    zio {
+        let! sku = checkSku sku
+        and! quantity = checkQuantity quantity
+        return sku, quantity
+    }
