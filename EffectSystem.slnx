@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/samples/">
+    <Project Path="samples/EffectSystem.PriorArt/EffectSystem.PriorArt.fsproj" />
     <Project Path="samples/EffectSystem.Samples/EffectSystem.Samples.fsproj" />
   </Folder>
   <Folder Name="/src/">

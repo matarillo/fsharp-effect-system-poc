@@ -20,7 +20,8 @@ let input = Path.Combine(root, "tmp", "docs-input")
 let projects =
     [ "src/EffectSystem/EffectSystem.fsproj"
       "src/EffectSystem.Plus/EffectSystem.Plus.fsproj"
-      "samples/EffectSystem.Samples/EffectSystem.Samples.fsproj" ]
+      "samples/EffectSystem.Samples/EffectSystem.Samples.fsproj"
+      "samples/EffectSystem.PriorArt/EffectSystem.PriorArt.fsproj" ]
 
 /// サイトに載せるページ。リポジトリ内のパス、サイトでのファイル名、メニューの順序。
 let pages =
@@ -42,6 +43,10 @@ let apiPage (path: string) =
     | p when p.StartsWith "samples/EffectSystem.Samples/" && p.EndsWith ".fs" ->
         let moduleName = Path.GetFileNameWithoutExtension(p).ToLowerInvariant()
         Some $"reference/effectsystem-samples-{moduleName}.html"
+    | "samples/EffectSystem.PriorArt/" -> Some "reference/effectsystem-priorart.html"
+    | p when p.StartsWith "samples/EffectSystem.PriorArt/" && p.EndsWith ".fs" ->
+        let moduleName = Path.GetFileNameWithoutExtension(p).ToLowerInvariant()
+        Some $"reference/effectsystem-priorart-{moduleName}.html"
     | _ -> None
 
 /// コードブロックの外の見出しを取り出す。

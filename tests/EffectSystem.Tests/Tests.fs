@@ -1423,7 +1423,13 @@ let staticSafety =
           shouldCompile "zio-never-function.fsx"
           shouldReject "zio-never-value.fsx" "FS0001" "int"
           shouldCompile "zio-validate.fsx"
-          shouldReject "zio-validate-without-plus.fsx" "FS0001" "StockError" ]
+          shouldReject "zio-validate-without-plus.fsx" "FS0001" "StockError"
+          shouldCompile "orsak-all-provided.fsx"
+          shouldReject "orsak-missing-provider.fsx" "FS0193" "IEmitProvider"
+          shouldCompile "orsak-distinct-providers.fsx"
+          shouldReject "orsak-two-instantiations.fsx" "FS0041" "IAskProvider<string>"
+          shouldCompile "orsak-and-with-plus.fsx"
+          shouldReject "orsak-and-without-plus.fsx" "FS0001" "op_Addition" ]
 
 [<EntryPoint>]
 let main argv =
@@ -1441,5 +1447,9 @@ let main argv =
           zioStyle
           runEncoding
           fsharpPlusBehaviour
+          PriorArtTests.orsakStyle
+          PriorArtTests.fioStyle
+          PriorArtTests.orsakBehaviour
+          PriorArtTests.fioBehaviour
           staticSafety ]
     |> runTestsWithCLIArgs [] argv

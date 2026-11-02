@@ -6,6 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="PriorArtTests.fs" />
     <Compile Include="Tests.fs" />
   </ItemGroup>
 
@@ -18,6 +19,7 @@
     <ProjectReference Include="..\..\src\EffectSystem\EffectSystem.fsproj" />
     <ProjectReference Include="..\..\src\EffectSystem.Plus\EffectSystem.Plus.fsproj" />
     <ProjectReference Include="..\..\samples\EffectSystem.Samples\EffectSystem.Samples.fsproj" />
+    <ProjectReference Include="..\..\samples\EffectSystem.PriorArt\EffectSystem.PriorArt.fsproj" />
   </ItemGroup>
 
 </Project>

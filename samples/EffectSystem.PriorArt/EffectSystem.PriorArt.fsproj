@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <FsDocsAllowExecutableProject>true</FsDocsAllowExecutableProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="OrsakStyle.fs" />
+    <Compile Include="FioStyle.fs" />
+    <Compile Include="Bench.fs" />
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Orsak" Version="0.7.0" />
+    <PackageReference Include="FSharp.FIO" Version="0.5.0-beta" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\EffectSystem\EffectSystem.fsproj" />
+    <ProjectReference Include="..\EffectSystem.Samples\EffectSystem.Samples.fsproj" />
+  </ItemGroup>
+
+</Project>
