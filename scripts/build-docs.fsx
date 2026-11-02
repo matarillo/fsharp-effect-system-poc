@@ -56,9 +56,9 @@ let githubSlug (heading: string) =
     let plain = heading.Replace("`", "").ToLowerInvariant()
     Regex.Replace(plain, @"[^\p{L}\p{M}\p{N}\s\-_]", "").Replace(" ", "-")
 
-/// fsdocs のアンカーの規則。
+/// fsdocs のアンカーの規則。インラインコードはアンカーに含まれない。
 let fsdocsSlug (heading: string) =
-    Regex.Replace(heading.Replace("`", ""), @"[^\p{L}\p{M}\p{N}]+", "-").Trim('-')
+    Regex.Replace(Regex.Replace(heading, "`[^`]*`", ""), @"[^\p{L}\p{M}\p{N}]+", "-").Trim('-')
 
 /// ページごとの、GitHub のアンカーから fsdocs のアンカーへの対応。
 let anchors =
