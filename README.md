@@ -11,6 +11,7 @@
 関連する文書は次のとおりです。
 
 - [docs/porting-notes.md](docs/porting-notes.md): 元資料の読解、エンジンごとの実装、各言語との対応、実測値、制限
+- [docs/row-polymorphism-report.md](docs/row-polymorphism-report.md): SRTP で行多相をどこまで模倣できるかの検証
 - API ドキュメント: XML コメントから生成します。型の設計思想はここにあります（[生成のしかた](#ドキュメントの生成)）
 
 ## 動かし方
@@ -315,6 +316,7 @@ Koka の `<ask<a>, emit<a> | e>` はハンドラーを被せるたびに 1 つ�
 | Freer 単体 | なし | `Eff.run` で実行時に `Unhandled` | |
 | Capability | 能力を値として引数で受ける | 能力がないので呼び出せない | 引数が増える。ハンドラーの外へ持ち出した能力は実行時に `Unhandled` |
 | Rio | インターフェイス制約 | FS0193 | 行は最後にまとめて閉じる。`IAsk<int>` と `IAsk<string>` を同時に要求できない |
+| RecordEnv | メンバー制約 | FS0001 | 行は最後にまとめて閉じる。環境を型変数のまま扱う関数には `inline` が要る |
 | StaticRow | 幽霊型のスロット | FS0001 | 1 段ずつ消えるが、エフェクトの追加で全シグネチャが変わる |
 
 要点は、行とは「必要なものの一覧」だということです。その値を渡すことにすれば、スコープが行と同じ役割を果たします。これは Effekt の能力渡しと同じ考え方です。
@@ -344,6 +346,18 @@ let askEmitRow (out: Log) =
 // val askEmitRow:
 //   out: Log -> Rio<'a,unit> when 'a :> IEmit<'b> and 'a :> IAsk<'b>
 ```
+
+環境のクラスを書きたくないときは `RecordEnv` を使います。インターフェイス制約を SRTP のメンバー制約に置き換えると、レコードをそのまま環境にできます。
+
+```fsharp
+let inline ask () : Rio< ^R, 'v> when ^R: (member Ask: IAsk<'v>) =
+    Rio(fun env -> (^R: (member Ask: IAsk<'v>) env).Ask())
+
+// AppEnv のクラスも転送も要らない。
+askEmit out |> Rio.run {| Ask = ask; Emit = emit |}
+```
+
+フィールドの名前がラベルの役割を果たすので、`IAsk<int>` と `IAsk<string>` も名前を分ければ同時に要求できます。ただし、行を 1 段ずつ消す手段にはなりません。SRTP で行多相をどこまで模倣できるかは[検証レポート](docs/row-polymorphism-report.md)にあります。
 
 ### 課題 5: 直接スタイルで書けない
 
@@ -398,6 +412,7 @@ Effect<'a>                     操作の宣言
  ├─ Direct       161 行        スレッドのスタックに継続を置く
  └─ Freer        153 行        ヒープ上のクロージャに継続を置く
      ├─ Capability + Rio  57 行    型ではなく能力で操作を探す
+     │   └─ RecordEnv (サンプル)   レコードを環境にする
      └─ StaticRow (サンプル)       幽霊型で行を表す
 
 Effect<'a> を使わない別系統
@@ -449,7 +464,7 @@ GADT がない以上、どこかにキャストは必要です。それを `perf
 
 - Freer の左ネストの改善（型整列キュー）
 - Direct のスレッドプール化と、再開されなかったファイバーの後始末
-- SRTP による行の型レベル探索
+- SRTP による行の型レベル探索（開いた行を注釈できず、コンパイル時間が行の深さに対して指数的に伸びる。[理由の詳細](docs/row-polymorphism-report.md#9-判断)）
 
 ## 方式の選び方
 
@@ -466,15 +481,16 @@ Koka、Unison、Polysemy を Freer へ写すと、行多相がないので検査
 
 | 目的 | 方式 | 理由 | 対応する言語 | 操作 1 回の目安 |
 |---|---|---|---|---|
-| アプリケーションの既定 | Capability + Rio | ハンドラーの付け忘れがコンパイルエラーになる。マルチショットも使える | Effekt | 約 80 ns（Capability の値。Rio は未計測） |
-| 継続を直接扱うライブラリ、学習 | Freer | Koka / Unison / Polysemy の書き方をすべて写せる | Koka / Unison / Polysemy | `fn` は約 45 ns、`ctl` は約 80 ns |
-| 既存の `async` コードに組み込む | Async one-shot | FSharp.Core だけで書け、タスクごとにスレッドを消費しない | OCaml の意味論 | 約 130 ns（最速経路の値） |
-| 関数の色を変えられない、OCaml の例をそのまま動かしたい | Direct | 普通の関数のまま `perform` できる唯一の方式。ファイバーごとにスレッドを 1 本使う | OCaml | 約 300〜350 ns（生成は約 75 µs） |
+| アプリケーションの既定 | Capability + Rio | ハンドラーの付け忘れがコンパイルエラーになる。マルチショットも使える | Effekt | Capability は約 130 ns、Rio は約 170 ns |
+| Rio の環境のクラスを書きたくない | RecordEnv | レコードをそのまま環境にできる。操作だけを `inline` にして、組み上げた計算は名前付きレコードで閉じる | Effekt | 約 170 ns（Rio と同じ） |
+| 継続を直接扱うライブラリ、学習 | Freer | Koka / Unison / Polysemy の書き方をすべて写せる | Koka / Unison / Polysemy | `fn` は約 60 ns、`ctl` は約 130 ns |
+| 既存の `async` コードに組み込む | Async one-shot | FSharp.Core だけで書け、タスクごとにスレッドを消費しない | OCaml の意味論 | 約 220 ns（最速経路の値） |
+| 関数の色を変えられない、OCaml の例をそのまま動かしたい | Direct | 普通の関数のまま `perform` できる唯一の方式。ファイバーごとにスレッドを 1 本使う | OCaml | 約 400〜600 ns（生成は約 80 µs） |
 | すでに FSharpPlus を使っていて、変換子へ解釈したい | FSharpPlus Free | `Free.fold` で任意のモナドへ畳み込める。それ以外では勧めない（[理由](docs/porting-notes.md#5-fsharpplus-を使うか)） | PureScript Run | 同じ条件で測っていない |
 
 測定の条件と幅は[移植ノート](docs/porting-notes.md#42-コスト)にあります。
 
-Capability でも、末尾で 1 回再開するだけの操作なら `shift` は要りません。能力のメソッドで `Eff.ret` を返せば継続を取り出さずに済み、`reset` もなくせます。コストは約 17 ns まで下がります（[EffektStyle.fs](samples/EffectSystem.Samples/EffektStyle.fs) の `askHandlerDirect`）。ただし区切りがなくなるので、ハンドラーの外へ持ち出した能力は `Unhandled` にならず、そのまま答えを返します。
+Capability でも、末尾で 1 回再開するだけの操作なら `shift` は要りません。能力のメソッドで `Eff.ret` を返せば継続を取り出さずに済み、`reset` もなくせます。コストは約 30 ns まで下がります（[EffektStyle.fs](samples/EffectSystem.Samples/EffektStyle.fs) の `askHandlerDirect`）。ただし区切りがなくなるので、ハンドラーの外へ持ち出した能力は `Unhandled` にならず、そのまま答えを返します。
 
 ## 構成
 
@@ -488,6 +504,7 @@ Capability でも、末尾で 1 回再開するだけの操作なら `shift` は
 | [tests/EffectSystem.Tests/Tests.fs](tests/EffectSystem.Tests/Tests.fs) | 記事とマニュアルの出力を期待値にしたテスト |
 | [tests/compile-fail/](tests/compile-fail/) | コンパイルエラーになることを確かめるスクリプトと対照群 |
 | [docs/porting-notes.md](docs/porting-notes.md) | 元資料の読解、エンジンごとの実装、各言語との対応、実測値、制限 |
+| [docs/row-polymorphism-report.md](docs/row-polymorphism-report.md) | SRTP で行多相をどこまで模倣できるかの検証 |
 | [docs/figures/](docs/figures/) | この README の図（手書きの SVG） |
 | [scripts/build-docs.fsx](scripts/build-docs.fsx) | fsdocs でサイトを生成するスクリプト。テンプレートは [docs/_template.html](docs/_template.html) |
 
@@ -504,6 +521,7 @@ Capability でも、末尾で 1 回再開するだけの操作なら `shift` は
 | [PureScriptStyle.fs](samples/EffectSystem.Samples/PureScriptStyle.fs) | PureScript Run の写し | FSharpPlus Free |
 | [AsyncOneShot.fs](samples/EffectSystem.Samples/AsyncOneShot.fs) | `Async` の継続で書いたスケジューラー | `Async.FromContinuations` |
 | [StaticRow.fs](samples/EffectSystem.Samples/StaticRow.fs) | 行を 1 段ずつ消す幽霊型 | Freer |
+| [RecordEnv.fs](samples/EffectSystem.Samples/RecordEnv.fs) | レコードを環境にするメンバー制約 | Capability |
 | [Advanced.fs](samples/EffectSystem.Samples/Advanced.fs) | State と NonDet、ジェネレーター、`finally` | Freer |
 | [Bench.fs](samples/EffectSystem.Samples/Bench.fs) | コストとスタックの計測 | すべて |
 

@@ -61,7 +61,7 @@ type internal Signal =
 /// <summary>1 通だけ受け渡す窓口。送信と受信は必ず交互に起きる。</summary>
 /// <remarks>
 /// 実行権の手渡しそのものである。セマフォの <c>Release</c> と <c>Wait</c> が順序を保証するので、
-/// <c>message</c> にロックは要らない。計測では操作 1 回の往復が約 400 ナノ秒で、1 コアに固定すると約 1.6 マイクロ秒だった。
+/// <c>message</c> にロックは要らない。計測では操作 1 回の往復が約 400〜600 ナノ秒で、1 コアに固定すると約 1.8 マイクロ秒だった。
 /// </remarks>
 type internal Handoff<'m>() =
     let ready = new SemaphoreSlim(0)
