@@ -883,6 +883,12 @@ let capabilitySemantics =
           testCase "インターフェイス制約を行にしたハンドラー"
           <| fun () -> Expect.equal (capture EffektStyle.exampleAskEmitRow) startEmitEnd ""
 
+          testCase "provideSome で行の一部を途中で消す"
+          <| fun () ->
+              let lines = ResizeArray<string>()
+              Expect.equal (EffektStyle.exampleLocalAsk lines.Add) 5 ""
+              Expect.equal (List.ofSeq lines) [ "Emit before"; "Emit local"; "Emit after" ] ""
+
           testCase "末尾で 1 回再開するだけの能力は Eff.ret で答えても結果が同じ"
           <| fun () ->
               let lines =
@@ -1135,6 +1141,10 @@ let staticSafety =
           shouldReject "rio-missing-emit.fsx" "FS0193" "IEmit"
           shouldReject "rio-two-instantiations.fsx" "FS0001" "int"
           shouldCompile "rio-distinct-interfaces.fsx"
+          shouldCompile "rio-local-all-provided.fsx"
+          shouldReject "rio-local-unforwarded.fsx" "FS0001" "ILog"
+          shouldReject "rio-local-rest-missing.fsx" "FS0193" "IEmit"
+          shouldReject "rio-local-open-rest.fsx" "FS0001" "IEmit"
           shouldCompile "record-all-provided.fsx"
           shouldReject "record-missing-emit.fsx" "FS0001" "get_Emit"
           shouldCompile "record-two-labels.fsx"

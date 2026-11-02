@@ -127,6 +127,7 @@ module Delimited =
 /// <para>
 /// <b>制限。</b>
 /// 行を 1 段ずつ消すことはできず、最後に環境をまとめて具体クラスとして与える。
+/// 計算の途中で能力を消すには、残りの行を列挙した転送クラスを <c>Rio.provideSome</c> に渡す。
 /// 環境に必要なインターフェイスが欠けていれば <c>Rio.run</c> の呼び出しが FS0193 になる。
 /// 同じジェネリックインターフェイスの別のインスタンスを同時に要求すると、推論が 1 つに単一化して FS0001 になるので、
 /// <c>IAskAge</c> と <c>IAskName</c> のように名前を分ける。
@@ -152,6 +153,16 @@ module Rio =
     /// <summary>計算をつなげる。両方が同じ <c>'R</c> を共有するので、制約が 1 つに集まる。</summary>
     let bind (f: 'a -> Rio<'R, 'b>) (m: Rio<'R, 'a>) : Rio<'R, 'b> =
         Rio(fun env -> run env m |> Eff.bind (fun x -> run env (f x)))
+
+    /// <summary>外側の環境から内側の環境を作って、内側の計算を動かす。ZIO の <c>provideSomeEnvironment</c> に当たる。</summary>
+    /// <remarks>
+    /// 能力を足す環境を作ると、その能力が外側の行から消える。
+    /// F# に行の引き算はないので、残りの行は ZIO の <c>provideSomeLayer[R0]</c> と同じように明示する。
+    /// ここでは <paramref name="f"/> の返す転送クラスがそれに当たり、残りを開いたままにはできない。
+    /// </remarks>
+    /// <param name="f">外側の環境から内側の環境を作る関数。</param>
+    /// <param name="m">内側の計算。</param>
+    let provideSome (f: 'R0 -> 'R) (m: Rio<'R, 'a>) : Rio<'R0, 'a> = Rio(fun env -> run (f env) m)
 
     /// <summary><c>rio { }</c> のビルダー。</summary>
     type Builder() =

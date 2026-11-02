@@ -27,6 +27,7 @@ let private showAll () =
     section "Effekt: askEmit" EffektStyle.exampleAskEmit
     section "Effekt: 両方を 2 回再開" EffektStyle.exampleBothTwice
     section "Effekt: インターフェイス制約を行として使う" EffektStyle.exampleAskEmitRow
+    section "Effekt: 行の一部を途中で消す" (fun out -> out (string (EffektStyle.exampleLocalAsk out)))
     section "Effekt: 字句スコープ" (fun out -> out (string (EffektStyle.exampleLexicalAddressing ())))
     attempt "Effekt: 持ち出した能力" (fun out -> out (EffektStyle.exampleEscapedCapability ()))
 

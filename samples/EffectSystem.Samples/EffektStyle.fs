@@ -232,3 +232,57 @@ let exampleAskEmitRow (out: Log) : unit =
         return! Rio.run (AppEnv(ask, emit)) (askEmitRow out)
     }
     |> Eff.run
+
+// ---- 行の一部を途中で消す ----
+
+/// <summary>ask に自分の能力で答え、残りの行 <c>IEmit</c> を外側の環境へ転送する環境。</summary>
+/// <typeparam name="'R">外側の環境の型。</typeparam>
+/// <typeparam name="'v">値の型。</typeparam>
+/// <remarks>
+/// ZIO の <c>provideSomeLayer[R0]</c> の <c>R0</c> に当たるものが、クラスの制約に現れる。
+/// 型変数が実装するインターフェイスをまとめて転送する手段はないので、残りの行を列挙する必要がある。
+/// Koka の <c>&lt;ask&lt;a&gt; | e&gt;</c> のように開いたままにはできない。
+/// </remarks>
+type AskOver<'R, 'v when 'R :> IEmit<'v>>(ask: IAsk<'v>, rest: 'R) =
+    interface IAsk<'v> with
+        member _.Ask() = ask.Ask()
+
+    interface IEmit<'v> with
+        member _.Emit v = rest.Emit v
+
+/// <summary>ask と emit を要求する子の計算。</summary>
+let askEmitLength () =
+    rio {
+        let! (v: string) = ask ()
+        do! emit v
+        return v.Length
+    }
+
+/// <summary>子の ask を局所的に処理する親の計算。行から <c>IAsk</c> が消える。</summary>
+/// <remarks>
+/// 注釈なしで次の型に推論される。
+/// <code lang="fsharp"><![CDATA[
+/// val localAsk: unit -> Rio<#IEmit<string>,int>
+/// ]]></code>
+/// </remarks>
+let localAsk () =
+    let local =
+        { new IAsk<string> with
+            member _.Ask() = Eff.ret "local" }
+
+    rio {
+        do! emit "before"
+        let! n = Rio.provideSome (fun env -> AskOver<_, string>(local, env)) (askEmitLength ())
+        do! emit "after"
+        return n
+    }
+
+/// <summary>親の計算を、<c>IEmit</c> だけを実装した環境で実行する。</summary>
+/// <param name="out">出力先。</param>
+/// <returns>子の計算が返した文字列の長さ。</returns>
+let exampleLocalAsk (out: Log) : int =
+    handlers {
+        let! emit = emitHandler out
+        return! Rio.run emit (localAsk ())
+    }
+    |> Eff.run
