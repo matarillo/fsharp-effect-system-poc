@@ -19,7 +19,7 @@
 
 ZIO から得た論点は README に載せている。F# のコードには、Freer の `bind`、`Rio.provideSome`、トランザクション、能力の寿命、失敗の型のサンプルを取り入れている。
 
-ZIO にはハンドラーも利用者が足せる操作もないので、エンジンの置き換えにはならない。一方、継続をランタイムが握ることで得ているもの（中断、リソースの保証、失敗の分類）は、ハンドラーのモデルだけでは出てこない論点である（[README の課題 8](../README.md#課題-8-失敗と中断を分けられない)）。
+ZIO で利用者が足せる操作は末尾で 1 回のもの（サービス）に限られ、継続を扱うハンドラーはないので、エンジンの置き換えにはならない。一方、継続をランタイムが握ることで得ているもの（中断、リソースの保証、失敗の分類）は、ハンドラーのモデルだけでは出てこない論点である（[README の課題 8](../README.md#課題-8-失敗と中断を分けられない)）。
 
 | 対象 | ZIO の手法 | F# で確かめた結果 | 判断 |
 |---|---|---|---|
@@ -32,7 +32,7 @@ ZIO にはハンドラーも利用者が足せる操作もないので、エン�
 
 判断を左右した実測は次の 3 つである。
 
-- **左ネストは型整列キューなしで解ける。** 深さ 4,000 の操作 1 回あたりが約 200〜270 ns、深さ 256,000 でも約 460〜510 ns で、1 MB のスタックで深さ 100 万が完走する。149 件のテストは Debug（`Tailcalls=false`）と Release の両方で通る（[3 節](#3-実行ループ-freer-の左ネストを解く)）。
+- **左ネストは型整列キューなしで解ける。** 深さ 4,000 の操作 1 回あたりが約 200〜270 ns、深さ 256,000 でも約 460〜510 ns で、1 MB のスタックで深さ 100 万が完走する。この検証の時点の 149 件のテストは Debug（`Tailcalls=false`）と Release の両方で通る（[3 節](#3-実行ループ-freer-の左ネストを解く)）。
 - **「継続を呼ばない」失敗は `finally` を飛ばす。** 同じ計算を 3 通りの失敗で動かすと、継続を捨てる形だけ後始末が走らない（[5.2 節](#52-失敗の表し方と-finally)）。
 - **`Async` は寿命と失敗の情報を保たない。** 親が終わっても `StartChild` の子は走り続け、`Async.Parallel` は同時の失敗を 1 つしか残さず、`finally` の例外は本体の例外を消す（[6.2 節](#62-async-との比較)）。
 
@@ -40,7 +40,7 @@ ZIO にはハンドラーも利用者が足せる操作もないので、エン�
 
 `ZIO[R, E, A]` は、環境 `R` を必要とし、`E` で失敗するか `A` で成功する計算の記述である。組み立てただけでは何も起きず、ランタイムが実行する点は Freer の `Eff<'a>` と同じである。
 
-違いは、木の節が閉じていることである。[実行ループ](https://github.com/zio/zio/blob/54cc16d47b97c28e47b9d8b22f9991ab9ec83396/core/shared/src/main/scala/zio/internal/FiberRuntime.scala#L1085)が扱う命令は `Exit`（成功と失敗）、`Sync`、`Async`、`FlatMap`、`Mapped`、`FoldZIO`、`Stateful`、`WhileLoop`、`YieldNow`、`UpdateRuntimeFlags`、`UpdateRuntimeFlagsWithin` の 12 種類である。`ZIO` は `sealed` で、`Exit` 以外の命令は `private[zio]` なので、利用者は命令を足せない。ハンドラーも `resume` もない。
+違いは、木の節が閉じていることである。[実行ループ](https://github.com/zio/zio/blob/54cc16d47b97c28e47b9d8b22f9991ab9ec83396/core/shared/src/main/scala/zio/internal/FiberRuntime.scala#L1085)が扱う命令は `Exit`（成功と失敗）、`Sync`、`Async`、`FlatMap`、`Mapped`、`FoldZIO`、`Stateful`、`WhileLoop`、`YieldNow`、`UpdateRuntimeFlags`、`UpdateRuntimeFlagsWithin` の 12 種類である。`ZIO` は `sealed` で、`Exit` 以外の命令は `private[zio]` なので、利用者は命令を足せない。`resume` もない。
 
 利用者の操作は、`ZIO` を返すメソッドを持つ[サービス](https://zio.dev/reference/service-pattern/)である。これは README の能力で `Eff.ret` を返す形（[EffektStyle.fs](../samples/EffectSystem.Samples/EffektStyle.fs) の `askHandlerDirect`）と同じで、ZIO の別名 `RIO[R, A]` はこのプロジェクトの `Rio<'R, 'a>` と同じ役割を持つ。
 
@@ -60,21 +60,33 @@ ZIO.serviceWithZIO[Ask[V]](_.ask)    // Rio の ask () に当たる
 | 保存して後で | ジェネレーター、非同期、スケジューラー | `ZIO.async`、`fork`、`ZIO.yieldNow` |
 | 複数回 | 非決定計算、バックトラック | **なし** |
 
-6 行のうち 5 行をランタイムの命令として持ち、複数回の再開だけを持たない。これが ZIO の設計の要点である。継続を利用者に渡さないので、ランタイムは継続が必ず 1 回で終わることを前提にでき、中断の最中でも後始末を保証できる。
+利用者に開くのは末尾で 1 回の行（サービス）だけで、残りのうち 4 行をランタイムの命令として持ち、複数回の再開は持たない。これが ZIO の設計の要点である。
 
-[設計軸](../README.md#実装を分ける設計軸)の上では次の位置にある。
+この要点は、ハンドラーにどこまでの制御を開くかで並べると分かりやすい。ハンドラーが継続をどこまで扱えるかには段階があり、下の段ほど後始末の責任が利用者に移る。Koka はこの段階を `fun`、`ctl`、`raw ctl` として言語で区別している（[Koka の文書](https://koka-lang.github.io/koka/doc/book.html)）。表は README の設計軸のうち、操作の意味を決めるもの、継続の寿命、再開の回数の 3 つを、後始末の責任の順に並べ直したものである。
+
+| 利用者に開く制御 | 後始末の責任 | 例 |
+|---|---|---|
+| 末尾で 1 回の操作だけ。継続は見えない | 制御の流れが一本道なので、`finally` は普通に走る | ZIO のサービス、Koka の `fun`、Polysemy の `interpret`、Capability と Rio（`Eff.ret` で答える場合） |
+| 継続を節の中だけで使う | 言語が持つ。Koka は、再開せずに終わった `ctl` の節から自動で巻き戻し、`finally` を走らせる | Koka の `ctl` |
+| 継続を値として持ち出せる（再開は 1 回） | 利用者が持つ。必ず再開するか、例外で再開する（OCaml の `discontinue`） | OCaml、Koka の `raw ctl`、Direct、Async one-shot |
+| 継続を複数回再開できる | 利用者が持つ。`finally` は再開のたびに走るので、二重の解放は利用者が防ぐ。Koka も `initially` と数え上げで手当てしている | Koka、Effekt、Unison、Freer |
+
+ZIO は一番上の段にある。継続を利用者に渡さないので、ランタイムは継続が必ず 1 回で終わることを前提にでき、中断の最中でも後始末を保証できる。下の段ほど、この保証はハンドラーの規律に頼ることになり、複数回の再開では資源を何回解放するかが定まらない。これは .NET に限った話ではなく、利用者に継続を開くかどうかの選択から来る。
+
+[設計軸](../README.md#実装を分ける設計軸)の上では次の位置にある。README の言語の比較表の ZIO の列は、この表を要約したものである。
 
 | 軸 | ZIO |
 |---|---|
-| 操作の集合 | 閉じている（ランタイムの命令） |
+| 操作の意味を決めるもの | ランタイムの命令。利用者が足せるのは末尾で 1 回の操作（サービス）だけ |
 | 継続の表現 | ヒープ上の可変配列 |
+| 継続の寿命 | 利用者には渡らない。実行系だけが持つ |
 | 再開の回数 | 1。利用者に渡るのは `ZIO.async` のコールバックだけで、[2 回目は無視される](https://github.com/zio/zio/blob/54cc16d47b97c28e47b9d8b22f9991ab9ec83396/core/shared/src/main/scala/zio/internal/FiberRuntime.scala#L1729) |
-| ハンドラーの範囲 | ハンドラーがない |
+| ハンドラーの範囲 | Deep に当たる。利用者のハンドラーはサービスだけで、環境に置いたまま計算全体で使える |
 | 探し方 | 最も近いもの（型タグ） |
 | 静的検査 | あり（`R`） |
 | 書き方 | モナド（`for`）。[zio-direct](https://zio.dev/zio-direct/) はマクロで `flatMap` へ書き換える |
 
-README の言語の比較表には ZIO を加えていない。表は記事の 6 言語で、それぞれに F# のサンプルが対応している。ZIO にはハンドラーがなく、列の多くが「なし」になる。STM、`ZStream`、`Schedule`、ZIO Test も、エフェクトのモデルから離れるので README では扱わない。
+STM、`ZStream`、`Schedule`、ZIO Test は、エフェクトのモデルから離れるので README では扱わない。
 
 周辺のライブラリとの関係は次のとおりである。
 
@@ -180,7 +192,7 @@ let bind (f: 'a -> Eff<'b>) (m: Eff<'a>) : Eff<'b> =
 
 | 確かめたこと | 結果 |
 |---|---|
-| テスト 149 件 | Release、Debug、Debug（`Tailcalls=false`）のすべてで通る |
+| テスト 149 件（この検証の時点） | Release、Debug、Debug（`Tailcalls=false`）のすべてで通る |
 | 左ネストの意味論 | 左ネストにマルチショット、`finally`、`Discontinue`、転送、未処理、再実行、`view` の 2 回の再開を組み合わせた計算を [Tests.fs](../tests/EffectSystem.Tests/Tests.fs) で固定している |
 | 左ネスト、fold、観測と `bind` の交互、1 MB のスタック | 100 万○（[移植ノートの 4.3 節](porting-notes.md#43-スタック)） |
 | `ctl` と `view` のハンドラーの左ネスト、外側の `try` の中の左ネスト | 深さ 100 万が完走する |
@@ -478,7 +490,7 @@ let ensuring (fin: Zio<'R, Never, unit>) (m: Zio<'R, 'E, 'a>) : Zio<'R, 'E, 'a> 
 | `UIO[A]` は任意の `ZIO[R, E, A]` として使える | 能力の戻り値を `widen` で変換する | F# に変性も部分型の `Nothing` もない |
 | `for` | `zio { }`。`if` と `for` をそのまま書ける | F# のコンピュテーション式はマクロなしで書ける |
 
-コストは [8.2 節](#82-ファイバーの試作)にある。Direct のスレッドを、止まっている間は約 330 バイトのオブジェクトに置き換えられる。代償は計算が `zio { }` で書かれること、再開が 1 回に限られること、利用者が操作の意味を定義できないことである。
+コストは [8.2 節](#82-ファイバーの試作)にある。Direct のスレッドを、止まっている間は約 330 バイトのオブジェクトに置き換えられる。代償は計算が `zio { }` で書かれること、再開が 1 回に限られること、利用者が制御の操作を定義できないことである。
 
 ## 7. レイヤー: 順序が意味を持たないハンドラー
 
@@ -624,7 +636,7 @@ Ryzen 7 8745H（16 論理プロセッサ）、.NET 10.0.13、F# 10（SDK 10.0.40
 | **途中で 1 回の `transaction`** | サンプルに入れている（[Advanced.fs](../samples/EffectSystem.Samples/Advanced.fs)） | README の継続の使い方の表が指す例になる |
 | `IGrowsInto` | 入れない | 転送の置き場所が変わるだけで、開いた行は書けない。同じ形は Orsak にある |
 | `E` のチャネル | 本体に入れない。サンプルにある（[ZioStyle.fs](../samples/EffectSystem.Samples/ZioStyle.fs)） | 操作ごとに約 50 ns 増え、型の問題は Rio と同じである。Orsak が同じ形を Task の上に実装している（[比較](orsak-fio-report.md#33-失敗)） |
-| ファイバー | 本体に入れない | 約 440 行で「一度に読み切れる大きさ」を超え、単一スレッドに限られる。利用者が操作の意味を定義できないので、このプロジェクトの主題から外れる。F# の実装には FIO がある（[比較](orsak-fio-report.md#4-fio-zio-の実行系を写したもの)） |
+| ファイバー | 本体に入れない | 約 440 行で「一度に読み切れる大きさ」を超え、単一スレッドに限られる。利用者が制御の操作を定義できないので、このプロジェクトの主題から外れる。F# の実装には FIO がある（[比較](orsak-fio-report.md#4-fio-zio-の実行系を写したもの)） |
 | ZLayer | 型は作らない。`scoped` の例がサンプルにある（[EffektStyle.fs](../samples/EffectSystem.Samples/EffektStyle.fs)） | `handlers { }` で足りる。自動配線はマクロなしでは書けない |
 | zio-direct | 書けない | マクロが要る。F# のコンピュテーション式が `if`、`while`、`try` を含めて同じ役割を果たす |
 | 既定のサービス、`FiberRef` | 作らない | サンプルの計算に必要がない |
@@ -675,5 +687,6 @@ Ryzen 7 8745H（16 論理プロセッサ）、.NET 10.0.13、F# 10（SDK 10.0.40
 **論文と解説**
 
 - Rúnar Bjarnason, [Stackless Scala With Free Monads](https://blog.higher-order.com/assets/trampolines.pdf), 2012
+- [The Koka Programming Language](https://koka-lang.github.io/koka/doc/book.html)（3.4.11 Initially and Finally、Raw Control）
 - VirtusLab, [Comparing effect systems in Scala: Kyo, Gears, and Ox](https://virtuslab.com/blog/scala/comparing-effect-systems-in-scala-kyo-gears-and-ox), 2026
 - [Effect: Managing Services](https://effect.website/docs/requirements-management/services/)

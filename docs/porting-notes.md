@@ -420,6 +420,11 @@ let rec runAsk (value: 'v) (m: Free<AskEmitLogF<'v, unit>, unit>) : Free<EmitLog
 - どのエンジンでも、`printfn` のような通常の副作用は型に現れない。Koka の `console` のようには追跡できない。
 - 型で探す方式（Freer、Direct）では、要素型が同じ `invert` を入れ子にすると操作が混ざる。外側の `push` を内側のハンドラーが受ける。OCaml なら `[1; 20]` になるはずの計算が `[10; 20]` になる。この `[1; 20]` はマニュアルの意味論から導いた値で、OCaml で実行してはいない。
 
+**元の言語との意味論の差**
+
+- Koka の `finally` は、再開せずに終わった `ctl` の節から巻き戻すときにも走る（[Koka の文書](https://koka-lang.github.io/koka/doc/book.html)の Initially and Finally）。Freer は捨てられた経路で `finally` を走らせず、`Eff.ctlK` の `Discontinue` で再開する必要がある（`finallySkippedWhenAbandoned`）。記事の例は `finally` を使わないので出力には影響しないが、KokaStyle の写しは後始末について Koka と同じではない。Koka は実行していない。
+- 複数回の再開で `finally` が再開のたびに走る点は、Freer も Koka も同じである。Koka は `initially` と数え上げで二重の解放を防ぐ書き方を示している。
+
 **Direct を本番で使う場合の注意**
 
 - ファイバーごとにスレッドを消費する。再開されない継続のスレッドはプロセスが終わるまで止まったままである。OCaml の `Gc.finalise` に当たる後始末は実装していない。
@@ -430,7 +435,7 @@ let rec runAsk (value: 'v) (m: Free<AskEmitLogF<'v, unit>, unit>) : Free<EmitLog
 
 - 6 言語の処理系は実行していない。比較の対象は記事とマニュアルに掲載された出力で、README の図3の位置づけもこれらとソースの記述による。
 - Polysemy と Run の継続の扱いはソースを読んで確認したもので、Haskell と PureScript では実行していない。図3で両者を「何回でも」に置いたのはこの結果による。
-- 149 件のテストは Debug と Release の両方で通っている。コンパイルエラーの検証は `dotnet fsi` で行い、通るスクリプトを対照群として並べて、失敗の理由が狙いどおりであることを確かめている。
+- 192 件のテストは Debug と Release の両方で通っている。コンパイルエラーの検証は `dotnet fsi` で行い、通るスクリプトを対照群として並べて、失敗の理由が狙いどおりであることを確かめている。
 - SRTP で行を型レベルのリストとして探索する方式は採用していない。開いた行を注釈できず（FS0043）、コンパイル時間が行の深さに対して指数的に伸びる（[検証レポート](row-polymorphism-report.md#9-判断)）。
 
 ## 参考文献
