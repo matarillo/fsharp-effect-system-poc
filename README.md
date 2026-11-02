@@ -13,6 +13,7 @@
 - [docs/porting-notes.md](docs/porting-notes.md): 元資料の読解、エンジンごとの実装、各言語との対応、実測値、制限
 - [docs/row-polymorphism-report.md](docs/row-polymorphism-report.md): SRTP で行多相をどこまで模倣できるかの検証
 - [docs/zio-report.md](docs/zio-report.md): Scala の ZIO とモデルの対応、F# のコードに活用できるものの検証
+- [docs/orsak-fio-report.md](docs/orsak-fio-report.md): F# の Orsak と FIO との比較、このプロジェクトに取り込めるものの検証
 - API ドキュメント: XML コメントから生成します。型の設計思想はここにあります（[生成のしかた](#ドキュメントの生成)）
 
 ## 動かし方
@@ -31,9 +32,12 @@ dotnet run -c Release --project samples/EffectSystem.Samples -- bench
 
 # スタックの限界の計測 (1 MB のスタックで動かします。溢れるとプロセスごと落ちます)
 dotnet run -c Release --project samples/EffectSystem.Samples -- limit direct-ctl 100000
+
+# Orsak と FIO で書いた例を実行する
+dotnet run --project samples/EffectSystem.PriorArt
 ```
 
-`limit` のエンジン名は `plain-recursion`、`direct-fn`、`direct-ctl`、`freer-fn`、`freer-ctl`、`freer-left`、`freer-fold`、`freer-try`、`freer-alternate`、`freer-tail-do` です。
+`limit` のエンジン名は `plain-recursion`、`direct-fn`、`direct-ctl`、`freer-fn`、`freer-ctl`、`freer-left`、`freer-fold`、`freer-try`、`freer-alternate`、`freer-tail-do` です。`samples/EffectSystem.PriorArt` にも `bench`、`parked`、`limit` があります（[使い方](samples/EffectSystem.PriorArt/Bench.fs)）。
 
 ### ドキュメントの生成
 
@@ -197,7 +201,7 @@ handle State(0) (handle NonDet program)  → ([(true, 0), (false, 1)], 2)       
 | 静的検査 | あり | あり | あり | なし | あり | あり |
 | 書き方 | 直接 | 直接 | 直接 | 直接 | do 記法 | do 記法 |
 
-ZIO はハンドラーを持たないので、この表には入れていません。操作の意味はランタイムの命令が決め、継続はヒープ上の可変配列に置きます（[位置づけ](docs/zio-report.md#2-zio-の位置づけ)）。
+ZIO はハンドラーを持たないので、この表には入れていません。操作の意味はランタイムの命令が決め、継続はヒープ上の可変配列に置きます（[位置づけ](docs/zio-report.md#2-zio-の位置づけ)）。F# の Orsak と FIO も同じ理由で入れていません。Orsak は ZIO の環境と失敗の型を Task の上に、FIO は ZIO の実行系を F# に写したものです（[位置づけ](docs/orsak-fio-report.md#2-位置づけ)）。
 
 ### Algebraic Effects と Extensible Effects
 
@@ -356,6 +360,8 @@ let askEmitRow (out: Log) =
 //   out: Log -> Rio<'a,unit> when 'a :> IEmit<'b> and 'a :> IAsk<'b>
 ```
 
+F# の Orsak も同じ符号化を使っていて、推論される型もコンパイル時の検査も Rio と同じになります（[確認](docs/orsak-fio-report.md#32-環境)）。
+
 計算の途中で行の一部を消すときは、`Rio.provideSome` で子の計算を包み、消す能力と残りの行を転送クラスに書きます（[EffektStyle.fs](samples/EffectSystem.Samples/EffektStyle.fs) の `localAsk`）。ZIO の `provideSomeLayer[R0]` が残りの行を型引数で受けるのと同じ形です。残りは列挙するしかなく、Koka の `<ask|e>` のように開いたままにはできません（[確認](docs/zio-report.md#42-行の一部を消す)）。
 
 環境のクラスを書きたくないときは `RecordEnv` を使います。インターフェイス制約を SRTP のメンバー制約に置き換えると、レコードをそのまま環境にできます。
@@ -428,6 +434,8 @@ Direct にはトランポリンが使えないので、Koka の `ctl` と `fun` 
 
 ZIO は継続を利用者に渡さず、1 回で終わることを前提にして、これらを保証しています。同じ形を F# へ写した単一スレッドの試作でも同じ意味論が動きますが（[試作](docs/zio-report.md#63-ファイバーの試作)）、複数回の再開と、利用者が定義する操作を諦めることになります。複数回の再開とリソースの保証は両立しにくいので、本体には入れていません。
 
+F# の FIO は、この形をマルチスレッドで実装したライブラリです。比べた 11 の場面のうち 7 つで ZIO と同じ結果になり、違いは中断したファイバーの結果を後始末より先に返すことと、失敗を 1 つの値で記録することから来ます（[比較](docs/orsak-fio-report.md#5-中断と構造化並行性)）。
+
 このほかに踏んだ問題（FSharpPlus の `Coproduct` が実行時に落ちる件、`Async` の継続がスレッドプールへ回される件）は[移植ノート](docs/porting-notes.md)に記録しています。
 
 ## サンプルの設計思想
@@ -484,19 +492,19 @@ GADT がない以上、どこかにキャストは必要です。それを `perf
 
 - 期待値には、記事とマニュアルに掲載された実行結果をそのまま使います。
 - コンパイルエラーになるという主張は [tests/compile-fail/](tests/compile-fail/) のスクリプトで検証します。通るスクリプトを対照群として並べ、狙いどおりの理由で失敗していることを確かめます。
-- FSharpPlus の挙動のような外部の事実もテストで固定し、版を上げて変わったら分かるようにしています。
+- FSharpPlus、Orsak、FIO の挙動のような外部の事実もテストで固定し、版を上げて変わったら分かるようにしています。
 - 計測のコマンドもリポジトリに入れ、数値を再現できるようにしています。
 
 ### 依存を増やさない
 
-`EffectSystem` 本体は FSharp.Core だけに依存します。FSharpPlus は別プロジェクト、Expecto はテストだけで使います。継続の操作には判別共用体と関数で足りるので、FSharpPlus は必須にしていません。
+`EffectSystem` 本体は FSharp.Core だけに依存します。FSharpPlus は別プロジェクト、Expecto はテストだけで使います。継続の操作には判別共用体と関数で足りるので、FSharpPlus は必須にしていません。比較のために使う Orsak と FIO も、[samples/EffectSystem.PriorArt/](samples/EffectSystem.PriorArt/) に分けています。
 
 ### やらなかったこと
 
 本番向けのライブラリではないので、次の点は実装していません。必要になれば、まずここから手を入れることになります。
 
-- 外からの中断とリソースの保証（複数回の再開と、利用者が定義する操作を諦めることになる。[課題 8](#課題-8-失敗と中断を分けられない)）
-- Direct のスレッドプール化と、再開されなかったファイバーの後始末
+- 外からの中断とリソースの保証（複数回の再開と、利用者が定義する操作を諦めることになる。[課題 8](#課題-8-失敗と中断を分けられない)）。F# では FIO が実装している
+- Direct のスレッドプール化と、再開されなかったファイバーの後始末。FIO のファイバーはスレッドプールの上で動くが、継続を利用者に渡さないので、Direct の `perform` は写せない
 - SRTP による行の型レベル探索（開いた行を注釈できず、コンパイル時間が行の深さに対して指数的に伸びる。[理由の詳細](docs/row-polymorphism-report.md#9-判断)）
 
 ## 方式の選び方
@@ -525,6 +533,8 @@ Koka、Unison、Polysemy を Freer へ写すと、行多相がないので検査
 
 Capability でも、末尾で 1 回再開するだけの操作なら `shift` は要りません。能力のメソッドで `Eff.ret` を返せば継続を取り出さずに済み、`reset` もなくせます。コストは約 25 ns まで下がります（[EffektStyle.fs](samples/EffectSystem.Samples/EffektStyle.fs) の `askHandlerDirect`）。ただし区切りがなくなるので、ハンドラーの外へ持ち出した能力は `Unhandled` にならず、そのまま答えを返します。
 
+このリポジトリは学習用です。同じことを本番でしたいときの F# の選択肢には Orsak と FIO があります。Orsak は Rio の環境に型付きの失敗を足して Task の上で動かすので、既存の非同期のコードに組み込みやすく、操作 1 回は Rio と同じ桁です。FIO は ZIO と同じ中断、後始末、構造化並行性を持ちます。どちらも、利用者が操作の意味を定義するハンドラーと、複数回の再開は持ちません（[比較](docs/orsak-fio-report.md#1-結論)）。
+
 ### 何を行に載せるか
 
 行に載せる価値があるのは、局所的で、消す演算子があり、型で追う意味があるものです。トランザクションやリクエストの文脈が当たります。サービスの実装が使う依存はコンストラクターで渡し、時刻やログのようにどこでも使う低レベルのものは載せません。ZIO も実際の使用からこの基準に落ち着いています（[根拠](docs/zio-report.md#43-何を行に載せるか)）。
@@ -539,10 +549,12 @@ Capability でも、末尾で 1 回再開するだけの操作なら `shift` は
 | [src/EffectSystem/Capability.fs](src/EffectSystem/Capability.fs) | 能力渡し、`Rio`、`handlers` |
 | [src/EffectSystem.Plus/RunStyle.fs](src/EffectSystem.Plus/RunStyle.fs) | FSharpPlus の `Free` を使った Run の移植 |
 | [tests/EffectSystem.Tests/Tests.fs](tests/EffectSystem.Tests/Tests.fs) | 記事とマニュアルの出力を期待値にしたテスト |
+| [tests/EffectSystem.Tests/PriorArtTests.fs](tests/EffectSystem.Tests/PriorArtTests.fs) | Orsak と FIO のサンプルの出力と、ライブラリの挙動のテスト |
 | [tests/compile-fail/](tests/compile-fail/) | コンパイルエラーになることを確かめるスクリプトと対照群 |
 | [docs/porting-notes.md](docs/porting-notes.md) | 元資料の読解、エンジンごとの実装、各言語との対応、実測値、制限 |
 | [docs/row-polymorphism-report.md](docs/row-polymorphism-report.md) | SRTP で行多相をどこまで模倣できるかの検証 |
 | [docs/zio-report.md](docs/zio-report.md) | Scala の ZIO とモデルの対応、F# のコードに活用できるものの検証 |
+| [docs/orsak-fio-report.md](docs/orsak-fio-report.md) | F# の Orsak と FIO との比較、このプロジェクトに取り込めるものの検証 |
 | [docs/figures/](docs/figures/) | この README の図（手書きの SVG） |
 | [scripts/build-docs.fsx](scripts/build-docs.fsx) | fsdocs でサイトを生成するスクリプト。テンプレートは [docs/_template.html](docs/_template.html) |
 
@@ -561,8 +573,16 @@ Capability でも、末尾で 1 回再開するだけの操作なら `shift` は
 | [StaticRow.fs](samples/EffectSystem.Samples/StaticRow.fs) | 行を 1 段ずつ消す幽霊型 | Freer |
 | [RecordEnv.fs](samples/EffectSystem.Samples/RecordEnv.fs) | レコードを環境にするメンバー制約 | Capability |
 | [Advanced.fs](samples/EffectSystem.Samples/Advanced.fs) | State と NonDet、ジェネレーター、`finally`、トランザクション | Freer |
-| [ZioStyle.fs](samples/EffectSystem.Samples/ZioStyle.fs) | ZIO の失敗の型 `E` の写し | Freer |
+| [ZioStyle.fs](samples/EffectSystem.Samples/ZioStyle.fs) | ZIO の失敗の型 `E` の写し、Orsak の `and!` | Freer |
 | [Bench.fs](samples/EffectSystem.Samples/Bench.fs) | コストとスタックの計測 | すべて |
+
+[samples/EffectSystem.PriorArt/](samples/EffectSystem.PriorArt/) は、F# の先行例をライブラリのまま使うサンプルです。
+
+| ファイル | 内容 | ライブラリ |
+|---|---|---|
+| [OrsakStyle.fs](samples/EffectSystem.PriorArt/OrsakStyle.fs) | 記事の askEmit、スコープで書くトランザクション、`and!` で失敗を合わせる | Orsak 0.7.0 |
+| [FioStyle.fs](samples/EffectSystem.PriorArt/FioStyle.fs) | 記事の askEmit、中断でも rollback するトランザクション、親子の寿命、中断不可の領域 | FSharp.FIO 0.5.0-beta |
+| [Bench.fs](samples/EffectSystem.PriorArt/Bench.fs) | コスト、止まっている計算のメモリ、スタックの計測 | 両方 |
 
 ## 参考文献
 
@@ -574,9 +594,9 @@ Capability でも、末尾で 1 回再開するだけの操作なら `shift` は
 - Brachthäuser, Schuster, Ostermann, [Effects as Capabilities](https://publikationen.uni-tuebingen.de/xmlui/handle/10900/123811), OOPSLA 2020
 - [F# RFC FS-1330: Support tailcalls in computation expressions](https://github.com/fsharp/fslang-design/blob/main/FSharp-10.0/FS-1330-support-tailcalls-in-computation-expressions.md)
 - [ZIO のドキュメント](https://zio.dev/overview/summary)
-- F# の先行例: [Orsak](https://github.com/JohSand/Orsak)（`Effect<'r, 'a, 'e>`）、[FIO](https://github.com/fs-fio/FIO)（ファイバーの実行系）。どちらも動かして評価はしていません
+- F# の先行例: [Orsak](https://github.com/JohSand/Orsak)（`Effect<'r, 'a, 'e>`）、[FIO](https://github.com/fs-fio/FIO)（ファイバーの実行系）。動かして比べた結果は[Orsak と FIO の検証](docs/orsak-fio-report.md)にあります
 
-実装の確認に使ったソースコードと、その他の論文は[移植ノートの参考文献](docs/porting-notes.md#参考文献)に、ZIO の詳しい出典は[検証レポートの参考文献](docs/zio-report.md#参考文献)にあります。
+実装の確認に使ったソースコードと、その他の論文は[移植ノートの参考文献](docs/porting-notes.md#参考文献)に、ZIO の詳しい出典は[検証レポートの参考文献](docs/zio-report.md#参考文献)に、Orsak と FIO の出典は[その参考文献](docs/orsak-fio-report.md#参考文献)にあります。
 
 ## ライセンス
 

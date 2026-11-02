@@ -85,7 +85,7 @@ README の言語の比較表には ZIO を加えていない。表は記事の 6
 | [Orsak](https://github.com/JohSand/Orsak) | F# | `Effect<'r, 'a, 'e>` | ZIO に着想を得た。`'r` はインターフェイス制約で、Rio と同じ形 |
 | [FIO](https://github.com/fs-fio/FIO) | F# | `FIO<'A, 'E>` | ZIO と Cats Effect に着想を得たファイバーの実行系。環境の型引数はない |
 
-F# での `'r` の符号化は Bartosz Sypytkowski の[記事](https://www.bartoszsypytkowski.com/dealing-with-complex-dependency-injection-in-f/)（2020）に遡る。Rio のインターフェイス制約は F# で知られた手法である。
+F# での `'r` の符号化は Bartosz Sypytkowski の[記事](https://www.bartoszsypytkowski.com/dealing-with-complex-dependency-injection-in-f/)（2020）に遡る。Rio のインターフェイス制約は F# で知られた手法である。Orsak と FIO は後から動かして比べた（[Orsak と FIO の検証](orsak-fio-report.md)）。
 
 ## 3. 実行ループ: Freer の左ネストを解く
 
@@ -375,6 +375,7 @@ let catchAll (h: 'E -> Zio<'R, 'E2, 'a>) (m: Zio<'R, 'E, 'a>) : Zio<'R, 'E2, 'a>
 | `mapError` で共通の共用体へ移す | 通る。Orsak の [`changeError`](https://johsand.github.io/Orsak/errors.html) と同じ解決である（`zio-map-error.fsx`） |
 | `catchAll` で `E` を消す | 通る（`val reserveOrZero: sku: string -> Zio<'a,'b,int>`）。スロットが 1 つなので、消す操作が普通の関数になる |
 | 静的抽象メンバーで `E` の行を作る（試作） | 通る（`when 'b :> IOfPayment<'b> and 'b :> IOfStock<'b>`）。最後に共用体で閉じる。1 段ずつは消せない |
+| `and!` で両方の失敗を残す | 失敗の型が `+` を持てば通る（`Zio.validate`、ZIO の `validate` に当たる）。持たなければ FS0001。Orsak の `and!` と同じ解決である（`zio-validate.fsx`、`zio-validate-without-plus.fsx`） |
 
 型に現れる部分は Rio と同じ構造で、行の問題も同じである。この `Zio` は `bind` ごとに `Result` を作るので、操作 1 回が約 50 ns 増える（[8.1 節](#81-freer-の-bind)）。ZIO は失敗を実行ループのスタックの走査で扱い、`E` は幽霊型なので、`flatMap` ごとの判定がない。6 節の試作も同じ方式である。
 
@@ -622,8 +623,8 @@ Ryzen 7 8745H（16 論理プロセッサ）、.NET 10.0.13、F# 10（SDK 10.0.40
 | **`Rio.provideSome`** | 本体に入れている（[Capability.fs](../src/EffectSystem/Capability.fs)）。転送クラスはサンプルにある（[EffektStyle.fs](../samples/EffectSystem.Samples/EffektStyle.fs)） | 1 行で書け、局所処理が Rio でも書けることを示せる |
 | **途中で 1 回の `transaction`** | サンプルに入れている（[Advanced.fs](../samples/EffectSystem.Samples/Advanced.fs)） | README の継続の使い方の表が指す例になる |
 | `IGrowsInto` | 入れない | 転送の置き場所が変わるだけで、開いた行は書けない。同じ形は Orsak にある |
-| `E` のチャネル | 本体に入れない。サンプルにある（[ZioStyle.fs](../samples/EffectSystem.Samples/ZioStyle.fs)） | 操作ごとに約 50 ns 増え、型の問題は Rio と同じである。Orsak が同じ形を実装している |
-| ファイバー | 本体に入れない | 約 440 行で「一度に読み切れる大きさ」を超え、単一スレッドに限られる。利用者が操作の意味を定義できないので、このプロジェクトの主題から外れる。F# の実装には FIO がある（評価はしていない） |
+| `E` のチャネル | 本体に入れない。サンプルにある（[ZioStyle.fs](../samples/EffectSystem.Samples/ZioStyle.fs)） | 操作ごとに約 50 ns 増え、型の問題は Rio と同じである。Orsak が同じ形を Task の上に実装している（[比較](orsak-fio-report.md#33-失敗)） |
+| ファイバー | 本体に入れない | 約 440 行で「一度に読み切れる大きさ」を超え、単一スレッドに限られる。利用者が操作の意味を定義できないので、このプロジェクトの主題から外れる。F# の実装には FIO がある（[比較](orsak-fio-report.md#4-fio-zio-の実行系を写したもの)） |
 | ZLayer | 型は作らない。`scoped` の例がサンプルにある（[EffektStyle.fs](../samples/EffectSystem.Samples/EffektStyle.fs)） | `handlers { }` で足りる。自動配線はマクロなしでは書けない |
 | zio-direct | 書けない | マクロが要る。F# のコンピュテーション式が `if`、`while`、`try` を含めて同じ役割を果たす |
 | 既定のサービス、`FiberRef` | 作らない | サンプルの計算に必要がない |
@@ -635,7 +636,7 @@ Ryzen 7 8745H（16 論理プロセッサ）、.NET 10.0.13、F# 10（SDK 10.0.40
   - `ZIO.scoped` が `Scope with R` から `R` をどこまで推論できるか
   - `E1 >: E` で広がった `E` が Scala 2 と 3 で何になるか
 - **ZIO のコストは測っていない。** 8 節の数値はすべて F# のものである。
-- **Effect、Kyo、Orsak、FIO は動かしていない。** Effect はソースのシグネチャ、Orsak と FIO はドキュメントの要約、Kyo は VirtusLab の記事の要約で確認した。
+- **Effect と Kyo は動かしていない。** Effect はソースのシグネチャ、Kyo は VirtusLab の記事の要約で確認した。Orsak と FIO は、この文書の後に動かして比べた（[Orsak と FIO の検証](orsak-fio-report.md)）。
 - **試作は単一スレッドである。** 複数コア、ブロッキング、スレッドの移動、公平性、負荷の下での挙動は評価していない。ZIO の 10,240 操作ごとの譲渡は写したが、効果は測っていない。
 - **`bind` の節の計算量は実測による。** 3.3 節の形を測ったもので、証明はしていない。測っていない形では、型整列キューが与える保証より弱い可能性がある。
 - **`Async` の比較は小さな例である。** `Task` と `task { }` は試していない。
