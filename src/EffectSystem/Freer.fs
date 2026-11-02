@@ -44,6 +44,50 @@ type Eff<'a> =
     /// <c>.tail</c> 呼び出しに頼らずスタックの伸びを防ぐ。
     /// </remarks>
     | Delayed of (unit -> Eff<'a>)
+    /// <summary>つなげた計算。ZIO の <c>FlatMap</c> に当たる。</summary>
+    /// <remarks>
+    /// <c>Eff.bind</c> はこの節を作るだけで、前の計算を進めない。進めるのは <c>Eff.run</c> とハンドラーのループである。
+    /// 再帰しないのでスタックは伸びない。左にネストした分は進めるときに右へ付け替えるので、操作あたりのコストも深さに比例しない。
+    /// </remarks>
+    | Bound of BindNode<'a>
+
+/// <summary><c>Bound</c> の中身。前の計算の結果の型を隠す。</summary>
+/// <typeparam name="'a">つなげた計算全体の結果の型。</typeparam>
+/// <remarks>
+/// F# に存在型がないので、前の計算の型を抽象クラスの内側へ閉じ込める。
+/// 再開を何度でもできるように、節は不変である。ZIO の実行ループのように可変の配列へ積むことはしない。
+/// </remarks>
+/// <category index="1">計算</category>
+and [<AbstractClass>] BindNode<'a> internal () =
+    /// <summary>計算を 1 段だけ進める。</summary>
+    abstract Step: unit -> Eff<'a>
+    /// <summary>後ろに次の計算をつなげる。左にネストした <c>bind</c> を右へ付け替える。</summary>
+    abstract Then<'b> : ('a -> Eff<'b>) -> Eff<'b>
+
+/// <summary>前の計算と、その結果を受け取る次の計算の組。<c>Eff.bind</c> が作る。</summary>
+/// <typeparam name="'x">前の計算の結果の型。</typeparam>
+/// <typeparam name="'a">つなげた計算全体の結果の型。</typeparam>
+/// <category index="1">計算</category>
+and [<Sealed>] internal BindOf<'x, 'a>(m: Eff<'x>, f: 'x -> Eff<'a>) =
+    inherit BindNode<'a>()
+
+    override _.Step() =
+        match m with
+        | Pure x -> f x
+        | Delayed th -> Bound(BindOf<'x, 'a>(th (), f))
+        | Impure(e, k) ->
+            Impure(
+                e,
+                (fun r ->
+                    match k r with
+                    | Pure x -> f x
+                    | n -> Bound(BindOf<'x, 'a>(n, f)))
+            )
+        | Bound inner -> inner.Then f
+
+    override _.Then<'b>(g: 'a -> Eff<'b>) : Eff<'b> =
+        // f x をその場で呼ぶと、同じ前の計算に足し重ねた節の分だけ再帰する。
+        Bound(BindOf<'x, 'b>(m, (fun x -> Bound(BindOf<'a, 'b>(Delayed(fun () -> f x), g)))))
 
 /// <summary>回答型が <c>'x</c> の操作の継続。値でも例外でも再開できる。</summary>
 /// <typeparam name="'x">操作の回答型。</typeparam>
@@ -136,7 +180,7 @@ type Case<'r> = internal Case of CaseImpl<'r>
 /// <summary>次の操作まで進めて覗いた計算の形。Unison の <c>Request {e, Ask a} r</c> に当たる。</summary>
 /// <typeparam name="'a">計算が最後に返す値の型。</typeparam>
 /// <remarks>
-/// <see cref="T:EffectSystem.Freer.Eff`1"/> から実装の都合である <c>Delayed</c> を取り除き、モデルどおりの 2 つの形だけを見せる。
+/// <see cref="T:EffectSystem.Freer.Eff`1"/> から実装の都合である <c>Delayed</c> と <c>Bound</c> を取り除き、モデルどおりの 2 つの形だけを見せる。
 /// 再帰を手で書くハンドラーは継続にハンドラーを自動で含めないので、実質的に Shallow ハンドラーになる。
 /// 状態を引数で持ち回るハンドラーを書くときに向いている。
 /// </remarks>
@@ -182,18 +226,24 @@ module Eff =
 
     /// <summary>計算をつなげる。モデルの <c>>>=</c> に当たる。</summary>
     /// <remarks>
-    /// <c>Impure</c> の節では、継続の後ろに <paramref name="f"/> を接ぎ木する。
-    /// 左にネストした <c>bind</c> は再開のたびにたどるので、操作あたりのコストがネストの深さに比例する。
-    /// Freer の既知の弱点で、この実装では対処していない。
-    /// 末尾の <c>do!</c> で再帰する形だけは、ビルダーの <c>ReturnFromFinal</c> が <c>bind</c> を通らないので、この問題が起きない。
+    /// モデルの等式をそのまま再帰で書くと、左にネストした <c>bind</c> を再開のたびにたどるので、操作あたりのコストがネストの深さに比例する。
+    /// これは Freer の知られた弱点で、型整列キューで解く方法もあるが、ここでは <c>Bound</c> の節を作るだけにして、進めるときに右へ付け替える。
     /// </remarks>
     /// <param name="f">前の計算の結果を受け取る、次の計算。</param>
     /// <param name="m">前の計算。</param>
-    let rec bind (f: 'a -> Eff<'b>) (m: Eff<'a>) : Eff<'b> =
+    let bind (f: 'a -> Eff<'b>) (m: Eff<'a>) : Eff<'b> =
         match m with
         | Pure x -> f x
-        | Impure(e, k) -> Impure(e, (fun r -> bind f (k r)))
-        | Delayed th -> Delayed(fun () -> bind f (th ()))
+        // 作りたての perform は節を作らずに包む。いちばん多い形で、再帰もしない。
+        | Impure(e, k) when obj.ReferenceEquals(k, PerformResume<'a>.Instance) ->
+            Impure(
+                e,
+                (fun r ->
+                    match k r with
+                    | Pure x -> f x
+                    | n -> Bound(BindOf<'a, 'b>(n, f)))
+            )
+        | _ -> Bound(BindOf<'a, 'b>(m, f))
 
     /// <summary>計算の結果に関数を適用する。</summary>
     let map (f: 'a -> 'b) (m: Eff<'a>) : Eff<'b> = bind (f >> Pure) m
@@ -210,7 +260,7 @@ module Eff =
 
     /// <summary>すべての操作が処理された計算を実行する。モデルの <c>run</c> に当たる。</summary>
     /// <remarks>
-    /// <c>Delayed</c> を受けるたびにこのループへ戻るので、スタックは伸びない。
+    /// <c>Delayed</c> と <c>Bound</c> を受けるたびにこのループへ戻るので、スタックは伸びない。
     /// 操作が残っていれば <see cref="T:EffectSystem.Unhandled"/> になる。型で検査できないので、ここが最後の防壁である。
     /// </remarks>
     /// <param name="m">実行する計算。</param>
@@ -219,12 +269,16 @@ module Eff =
             match m with
             | Pure x -> x
             | Delayed th -> loop (th ())
+            | Bound n -> loop (n.Step())
             | Impure(e, _) -> raise (Unhandled e)
 
         loop m
 
     /// <summary>計算の全区間に <c>try ... with</c> を掛ける。</summary>
-    /// <remarks>F# の <c>try</c> は最初の区間しか覆えないので、再開のたびに掛け直す。</remarks>
+    /// <remarks>
+    /// F# の <c>try</c> は最初の区間しか覆えないので、再開のたびに掛け直す。
+    /// 入れ子の <c>try</c> は操作のたびに全段を通るので、コストとスタックが入れ子の深さに比例する。
+    /// </remarks>
     let rec private tryWith (m: unit -> Eff<'a>) (h: exn -> Eff<'a>) : Eff<'a> =
         let step =
             try
@@ -236,12 +290,15 @@ module Eff =
         | Choice2Of2 e -> h e
         | Choice1Of2(Pure x) -> Pure x
         | Choice1Of2(Delayed th) -> Delayed(fun () -> tryWith th h)
+        // 節はこの場で進める。Delayed で返すと、入れ子の try を 1 歩ごとに通り直す。
+        | Choice1Of2(Bound n) -> tryWith n.Step h
         | Choice1Of2(Impure(e, k)) -> Impure(e, (fun r -> tryWith (fun () -> k r) h))
 
     /// <summary>計算の全区間に <c>try ... finally</c> を掛ける。</summary>
     /// <remarks>
     /// マルチショットでは経路ごとに終端があるので、<c>fin</c> は経路の数だけ走る。
     /// 再開されずに捨てられた経路では走らない。確実に走らせるには <c>Continuation.Discontinue</c> で再開する。
+    /// 入れ子のコストは <c>tryWith</c> と同じである。
     /// </remarks>
     let rec private tryFinally (m: unit -> Eff<'a>) (fin: unit -> unit) : Eff<'a> =
         let step =
@@ -256,6 +313,8 @@ module Eff =
             fin ()
             Pure x
         | Delayed th -> Delayed(fun () -> tryFinally th fin)
+        // 節はこの場で進める。理由は tryWith と同じである。
+        | Bound n -> tryFinally n.Step fin
         | Impure(e, k) -> Impure(e, (fun r -> tryFinally (fun () -> k r) fin))
 
     /// <summary>継続を <see cref="T:EffectSystem.Freer.Continuation`2"/> として受け取る分岐を作る。</summary>
@@ -271,6 +330,7 @@ module Eff =
     /// <remarks>
     /// 継続の呼び方でハンドラーの意味が決まる。呼ばなければ例外、末尾で 1 回なら依存性の注入、
     /// 複数回なら非決定計算になる。
+    /// 呼ばずに捨てた経路では、計算の中の <c>finally</c> が走らない。走らせるには <c>Eff.ctlK</c> の <c>Discontinue</c> で再開する。
     /// </remarks>
     /// <example>
     /// <code lang="fsharp"><![CDATA[
@@ -323,12 +383,13 @@ module Eff =
     /// <remarks>
     /// 継続を <c>deep</c> で包むので、再開後の操作も同じハンドラーが受ける。これが Deep の意味である。
     /// 分岐に渡す再開を <c>Delayed</c> で包むと <c>Eff.run</c> のループへ戻るので、末尾再開ならスタックは伸びない。
-    /// 答えをその場で返す分岐と <c>Delayed</c> の節は、自己末尾呼び出しなのでコンパイラがループにする。
+    /// 答えをその場で返す分岐と <c>Delayed</c>、<c>Bound</c> の節は、自己末尾呼び出しなのでコンパイラがループにする。
     /// </remarks>
     let rec private deep (retc: 'a -> Eff<'r>) (cases: CaseImpl<'r>[]) (m: Eff<'a>) : Eff<'r> =
         match m with
         | Pure x -> retc x
         | Delayed th -> deep retc cases (th ())
+        | Bound n -> deep retc cases (n.Step())
         | Impure(e, k) ->
             match findCase cases e with
             | null -> Impure(e, (fun r -> Delayed(fun () -> deep retc cases (k r))))
@@ -354,6 +415,7 @@ module Eff =
         match m with
         | Pure x -> Return x
         | Delayed th -> view (th ())
+        | Bound n -> view (n.Step())
         | Impure(e, k) -> Operation(e, k)
 
     /// <summary><c>view</c> で覗いた結果のうち、自分が扱わない操作を外側へ転送する。</summary>
@@ -386,8 +448,8 @@ module Eff =
 
         /// <summary>末尾にある <c>return! m</c> と <c>do! m</c>。F# 10 のコンパイラが選ぶ（FS-1330）。</summary>
         /// <remarks>
-        /// これがないと末尾の <c>do! m</c> は <c>Bind</c> になり、再帰すると左にネストした <c>bind</c> が積み上がる。
-        /// <c>m</c> をそのまま返せば、<c>do!</c> の再帰のコストは深さによらず一定になる。
+        /// これがないと末尾の <c>do! m</c> は <c>Bind</c> になり、再帰すると <c>Bound</c> の節が深さの分だけ残る。
+        /// <c>m</c> をそのまま返せば節を作らないので、<c>do!</c> の再帰はメモリも増えない。
         /// <c>try</c> の中はコンパイラが末尾として扱わないので、例外の捕捉は変わらない。
         /// </remarks>
         member _.ReturnFromFinal(m: Eff<'a>) : Eff<'a> = m

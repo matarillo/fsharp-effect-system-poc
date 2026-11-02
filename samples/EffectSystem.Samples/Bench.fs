@@ -109,7 +109,7 @@ let private freerTailDo (n: int) =
 
     sum
 
-/// <summary><c>bind</c> を左にネストさせる。Freer の既知の弱点で、全体のコストが深さの 2 乗に近づく。</summary>
+/// <summary><c>bind</c> を左にネストさせる。<c>Bound</c> の節を右へ付け替えるので、操作あたりのコストが深さに比例しない。</summary>
 let rec private leftNested (depth: int) : Eff<int> =
     eff {
         if depth = 0 then
@@ -123,6 +123,43 @@ let rec private leftNested (depth: int) : Eff<int> =
 /// <summary>左ネストの計算を測る。</summary>
 let private freerLeftNested (n: int) =
     leftNested n |> Eff.handle [ Eff.fn (fun (_: Ask<int>) -> 1) ] |> Eff.run
+
+/// <summary>遅延を挟まずに <c>Eff.bind</c> を左へ積む計算を測る。組み立てのときに深さの分の節ができる。</summary>
+let private freerFold (n: int) =
+    List.replicate n ()
+    |> List.fold
+        (fun acc () -> acc |> Eff.bind (fun s -> Eff.perform Ask |> Eff.map (fun (v: int) -> s + v)))
+        (Eff.ret 0)
+    |> Eff.handle [ Eff.fn (fun (_: Ask<int>) -> 1) ]
+    |> Eff.run
+
+/// <summary>各段に <c>try</c> を持つ左ネスト。操作が全段の <c>try</c> を通るので、操作あたりのコストが深さに比例する。</summary>
+let rec private leftTry (depth: int) : Eff<int> =
+    eff {
+        if depth = 0 then
+            return 0
+        else
+            try
+                let! rest = leftTry (depth - 1)
+                let! (v: int) = Eff.perform Ask
+                return rest + v
+            finally
+                ()
+    }
+
+/// <summary>各段に <c>try</c> を持つ左ネストを測る。</summary>
+let private freerLeftTry (n: int) =
+    leftTry n |> Eff.handle [ Eff.fn (fun (_: Ask<int>) -> 1) ] |> Eff.run
+
+/// <summary>観測するたびに、残りの計算の後ろへ <c>bind</c> を足す計算を測る。</summary>
+let private freerAlternate (n: int) =
+    let rec go (m: Eff<int>) =
+        match Eff.view m with
+        | Return x -> x
+        | Eff.Op((_: Ask<int>), k) -> go (k 1 |> Eff.bind Eff.ret)
+        | Operation(e, _) -> raise (Unhandled e)
+
+    go (freerBody n 0)
 
 /// <summary>能力渡しの計測に使う能力。</summary>
 type private ICounter =
@@ -276,6 +313,14 @@ let run () =
     measure "Direct: fiber create + finish" 5_000 directFiberCreation
     measure "Freer left-nested, depth 1000" 1_000 freerLeftNested
     measure "Freer left-nested, depth 4000" 4_000 freerLeftNested
+    measure "Freer left-nested, depth 16000" 16_000 freerLeftNested
+    measure "Freer left-nested, depth 64000" 64_000 freerLeftNested
+    measure "Freer left-nested, depth 256000" 256_000 freerLeftNested
+    measure "Freer fold, depth 4000" 4_000 freerFold
+    measure "Freer try at every level, depth 250" 250 freerLeftTry
+    measure "Freer try at every level, depth 1000" 1_000 freerLeftTry
+    measure "Freer alternating view and bind, depth 4000" 4_000 freerAlternate
+    measure "Freer alternating view and bind, depth 256000" 256_000 freerAlternate
     measure "Freer tail do!, depth 1000" 1_000 freerTailDo
     measure "Freer tail do!, depth 4000" 4_000 freerTailDo
 
@@ -285,7 +330,7 @@ let rec private plainRecursion (depth: int) : int =
 
 /// <summary>1 MB のスタックで動かして、スタックの限界を調べる。</summary>
 /// <remarks>溢れるとプロセスごと落ちるので、1 回の実行で 1 つの N だけ試す。</remarks>
-/// <param name="engine"><c>plain-recursion</c>、<c>direct-fn</c>、<c>direct-ctl</c>、<c>freer-fn</c>、<c>freer-ctl</c>、<c>freer-left</c>、<c>freer-tail-do</c> のいずれか。</param>
+/// <param name="engine"><c>plain-recursion</c>、<c>direct-fn</c>、<c>direct-ctl</c>、<c>freer-fn</c>、<c>freer-ctl</c>、<c>freer-left</c>、<c>freer-fold</c>、<c>freer-try</c>、<c>freer-alternate</c>、<c>freer-tail-do</c> のいずれか。</param>
 /// <param name="n">操作の回数、または再帰の深さ。</param>
 let limit (engine: string) (n: int) =
     let f =
@@ -296,6 +341,9 @@ let limit (engine: string) (n: int) =
         | "freer-fn" -> freerFn
         | "freer-ctl" -> freerCtl
         | "freer-left" -> freerLeftNested
+        | "freer-fold" -> freerFold
+        | "freer-try" -> freerLeftTry
+        | "freer-alternate" -> freerAlternate
         | "freer-tail-do" -> freerTailDo
         | other -> failwithf "unknown engine: %s" other
 

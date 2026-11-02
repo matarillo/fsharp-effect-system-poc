@@ -520,10 +520,18 @@ let freerSemantics =
                       do! tailDo (remaining - 1)
               }
 
+          let rec notTailDo (remaining: int) : Eff<unit> =
+              eff {
+                  if remaining > 0 then
+                      do! Eff.perform (Emit 1)
+                      do! notTailDo (remaining - 1)
+                      return ()
+              }
+
           /// 計算を実行して、操作 1 回あたりの割り当てを返す。
-          let bytesPerOperation (n: int) =
+          let bytesPerOperation (body: int -> Eff<unit>) (n: int) =
               let before = GC.GetAllocatedBytesForCurrentThread()
-              tailDo n |> Eff.handle [ Eff.fn (fun (Emit(_: int)) -> ()) ] |> Eff.run
+              body n |> Eff.handle [ Eff.fn (fun (Emit(_: int)) -> ()) ] |> Eff.run
               float (GC.GetAllocatedBytesForCurrentThread() - before) / float n
 
           testCase "末尾の do! の再帰はスタックを伸ばさない"
@@ -538,10 +546,276 @@ let freerSemantics =
 
           testCase "末尾の do! の再帰は操作あたりのコストが深さによらない"
           <| fun () ->
-              // ReturnFromFinal がなければ、bind が積み上がって 8 倍近くになる。
-              let shallow = bytesPerOperation 1_000
-              let deep = bytesPerOperation 8_000
+              let shallow = bytesPerOperation tailDo 1_000
+              let deep = bytesPerOperation tailDo 8_000
               Expect.isLessThan deep (shallow * 1.5) $"深さ 1000 で {shallow} B、深さ 8000 で {deep} B"
+
+          testCase "末尾の do! は bind の節を作らない"
+          <| fun () ->
+              // ReturnFromFinal がなければ、末尾でない do! と同じだけ割り当てる。
+              let tail = bytesPerOperation tailDo 1_000
+              let notTail = bytesPerOperation notTailDo 1_000
+              Expect.isLessThan tail notTail $"末尾で {tail} B、末尾でないと {notTail} B"
+
+          let rec leftNested (depth: int) : Eff<int> =
+              eff {
+                  if depth = 0 then
+                      return 0
+                  else
+                      let! rest = leftNested (depth - 1)
+                      let! (v: int) = Eff.perform Ask
+                      return rest + v
+              }
+
+          /// 遅延を挟まずに bind を左へ積む。
+          let leftFold (next: int -> Eff<int> -> Eff<int>) (depth: int) : Eff<int> =
+              [ 1..depth ] |> List.fold (fun acc i -> next i acc) (Eff.ret 0)
+
+          let addAsk (_: int) (acc: Eff<int>) : Eff<int> =
+              acc |> Eff.bind (fun s -> Eff.perform Ask |> Eff.map (fun (v: int) -> s + v))
+
+          let answerOne (m: Eff<int>) : int =
+              m |> Eff.handle [ Eff.fn (fun (_: Ask<int>) -> 1) ] |> Eff.run
+
+          testCase "左ネストはスタックを伸ばさない"
+          <| fun () -> Expect.equal (leftNested 1_000_000 |> answerOne) 1_000_000 ""
+
+          testCase "遅延なしで左へ積んだ bind はスタックを伸ばさない"
+          <| fun () -> Expect.equal (leftFold addAsk 1_000_000 |> answerOne) 1_000_000 ""
+
+          testCase "ctl のハンドラーでも左ネストはスタックを伸ばさない"
+          <| fun () ->
+              let sum =
+                  leftNested 1_000_000
+                  |> Eff.handle [ Eff.ctl (fun (_: Ask<int>) resume -> resume 1) ]
+                  |> Eff.run
+
+              Expect.equal sum 1_000_000 ""
+
+          testCase "view のハンドラーでも左ネストはスタックを伸ばさない"
+          <| fun () ->
+              let rec handler (m: Eff<int>) : Eff<int> =
+                  Eff.delay (fun () ->
+                      match Eff.view m with
+                      | Return a -> Eff.ret a
+                      | Eff.Op((_: Ask<int>), k) -> handler (k 1)
+                      | other -> Eff.forward other handler)
+
+              Expect.equal (leftNested 1_000_000 |> handler |> Eff.run) 1_000_000 ""
+
+          testCase "外側の try の中の左ネストはスタックを伸ばさない"
+          <| fun () ->
+              let body =
+                  eff {
+                      try
+                          return! leftNested 1_000_000
+                      finally
+                          ()
+                  }
+
+              Expect.equal (answerOne body) 1_000_000 ""
+
+          testCase "観測と bind を交互に重ねてもスタックを伸ばさない"
+          <| fun () ->
+              let rec go (m: Eff<int>) =
+                  match Eff.view m with
+                  | Return x -> x
+                  | Eff.Op((_: Ask<int>), k) -> go (k 1 |> Eff.bind Eff.ret)
+                  | Operation(e, _) -> raise (Unhandled e)
+
+              Expect.equal (go (tick 1_000_000 0)) 1_000_000 ""
+
+          let rec leftTry (depth: int) : Eff<int> =
+              eff {
+                  if depth = 0 then
+                      return 0
+                  else
+                      try
+                          let! rest = leftTry (depth - 1)
+                          let! (v: int) = Eff.perform Ask
+                          return rest + v
+                      finally
+                          ()
+              }
+
+          testCase "各段に try がある左ネストはコストが深さの 3 乗にならない"
+          <| fun () ->
+              // 操作が全段の try を通るので、操作あたりの割り当ては深さに比例する。節を Delayed で返すと 2 乗になる。
+              let bytes (depth: int) =
+                  let before = GC.GetAllocatedBytesForCurrentThread()
+                  leftTry depth |> answerOne |> ignore
+                  float (GC.GetAllocatedBytesForCurrentThread() - before) / float depth
+
+              let shallow = bytes 250
+              let deep = bytes 1_000
+              Expect.isLessThan deep (shallow * 8.0) $"深さ 250 で {shallow} B、深さ 1000 で {deep} B"
+
+          testCase "左ネストは操作あたりのコストが深さによらない"
+          <| fun () ->
+              let bytes (depth: int) =
+                  let before = GC.GetAllocatedBytesForCurrentThread()
+                  leftNested depth |> answerOne |> ignore
+                  float (GC.GetAllocatedBytesForCurrentThread() - before) / float depth
+
+              let shallow = bytes 1_000
+              let deep = bytes 8_000
+              Expect.isLessThan deep (shallow * 1.5) $"深さ 1000 で {shallow} B、深さ 8000 で {deep} B"
+
+          let rec leftChoose (depth: int) : Eff<int list> =
+              eff {
+                  if depth = 0 then
+                      return []
+                  else
+                      let! rest = leftChoose (depth - 1)
+                      let! (b: bool) = Eff.perform Advanced.Choose
+                      return (if b then depth else -depth) :: rest
+              }
+
+          let leftChooseResult =
+              [ [ 3; 2; 1 ]
+                [ -3; 2; 1 ]
+                [ 3; -2; 1 ]
+                [ -3; -2; 1 ]
+                [ 3; 2; -1 ]
+                [ -3; 2; -1 ]
+                [ 3; -2; -1 ]
+                [ -3; -2; -1 ] ]
+
+          testCase "左ネストの途中の継続を何度も呼べる"
+          <| fun () -> Expect.equal (leftChoose 3 |> Advanced.runAll |> Eff.run) leftChooseResult ""
+
+          testCase "左ネストの計算は何度でも実行できる"
+          <| fun () ->
+              let again = leftChoose 3 |> Advanced.runAll
+              Expect.equal (Eff.run again) leftChooseResult "1 回目"
+              Expect.equal (Eff.run again) leftChooseResult "2 回目"
+
+          testCase "遅延なしで左へ積んだ bind の継続を何度も呼べる"
+          <| fun () ->
+              let choose (i: int) (acc: Eff<int>) : Eff<int> =
+                  acc
+                  |> Eff.bind (fun s ->
+                      Eff.perform Advanced.Choose |> Eff.map (fun b -> if b then s + i else s - i))
+
+              Expect.equal (leftFold choose 3 |> Advanced.runAll |> Eff.run) [ 6; 0; 2; -4; 4; -2; 0; -6 ] ""
+
+          testCase "左ネストの finally は経路ごとに走る"
+          <| fun () ->
+              let log = ResizeArray<string>()
+
+              let rec body (depth: int) : Eff<int> =
+                  eff {
+                      if depth = 0 then
+                          return 0
+                      else
+                          try
+                              let! rest = body (depth - 1)
+                              let! (v: int) = Eff.perform Ask
+                              return rest + v
+                          finally
+                              log.Add $"release {depth}"
+                  }
+
+              let result =
+                  body 3
+                  |> Eff.handle
+                      [ Eff.ctl (fun (_: Ask<int>) resume ->
+                            eff {
+                                let! a = resume 1
+                                let! b = resume 10
+                                return a + b
+                            }) ]
+                  |> Eff.run
+
+              Expect.equal result 132 ""
+
+              Expect.equal
+                  (List.ofSeq log)
+                  [ "release 1"
+                    "release 2"
+                    "release 3"
+                    "release 3"
+                    "release 2"
+                    "release 3"
+                    "release 3"
+                    "release 1"
+                    "release 2"
+                    "release 3"
+                    "release 3"
+                    "release 2"
+                    "release 3"
+                    "release 3" ]
+                  ""
+
+          testCase "Discontinue は左ネストの try に内側から順に届く"
+          <| fun () ->
+              let log = ResizeArray<string>()
+
+              let rec body (depth: int) : Eff<string> =
+                  eff {
+                      if depth = 0 then
+                          let! (v: string) = Eff.perform Ask
+                          return v
+                      else
+                          try
+                              let! r = body (depth - 1)
+                              return $"{depth}:{r}"
+                          with e ->
+                              log.Add $"caught at {depth}: {e.Message}"
+                              return raise e
+                  }
+
+              let handled =
+                  body 3
+                  |> Eff.handle [ Eff.ctlK (fun (_: Ask<string>) k -> k.Discontinue(exn "unwind")) ]
+
+              Expect.throwsT<Exception> (fun () -> Eff.run handled |> ignore) ""
+              Expect.equal (List.ofSeq log |> List.take 3) [ "caught at 1: unwind"; "caught at 2: unwind"; "caught at 3: unwind" ] ""
+
+          let rec leftForward (depth: int) : Eff<int> =
+              eff {
+                  if depth = 0 then
+                      return 0
+                  else
+                      let! rest = leftForward (depth - 1)
+                      let! (v: int) = Eff.perform Ask
+                      do! Eff.perform (Emit $"{depth}:{v}")
+                      return rest + v
+              }
+
+          testCase "左ネストの操作を外側のハンドラーへ転送する"
+          <| fun () ->
+              let lines = ResizeArray<string>()
+
+              let result =
+                  leftForward 4
+                  |> Eff.handle [ Eff.fn (fun (Emit(s: string)) -> lines.Add s) ]
+                  |> Eff.handle [ Eff.fn (fun (_: Ask<int>) -> 2) ]
+                  |> Eff.run
+
+              Expect.equal result 8 ""
+              Expect.equal (List.ofSeq lines) [ "1:2"; "2:2"; "3:2"; "4:2" ] ""
+
+          testCase "左ネストの未処理の操作は Unhandled"
+          <| fun () ->
+              let handled = leftForward 2 |> Eff.handle [ Eff.fn (fun (_: Ask<int>) -> 2) ]
+              Expect.throwsT<Unhandled> (fun () -> Eff.run handled |> ignore) ""
+
+          testCase "view で止めた左ネストの継続を 2 回再開できる"
+          <| fun () ->
+              let emitted (m: Eff<int>) =
+                  match Eff.view m with
+                  | Eff.Op((Emit(s: string)), k) ->
+                      match Eff.view (k ()) with
+                      | Return v -> (s, v)
+                      | _ -> failwith "計算が終わっていない"
+                  | _ -> failwith "Emit で止まっていない"
+
+              match Eff.view (leftForward 1) with
+              | Eff.Op((_: Ask<int>), k) ->
+                  Expect.equal (emitted (k 5)) ("1:5", 5) "1 回目"
+                  Expect.equal (emitted (k 6)) ("1:6", 6) "2 回目"
+              | _ -> failwith "Ask で止まっていない"
 
           testCase "try の中の return! は末尾として扱われず、例外を捕捉する"
           <| fun () ->
