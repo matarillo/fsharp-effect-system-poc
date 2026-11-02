@@ -7,6 +7,8 @@
 // README とドキュメントは、リポジトリの中で読めるように、ファイルへの相対リンクと GitHub 式のアンカーで書いている。
 // そのままサイトにするとリンクが切れるので、入力を作業用のフォルダーへ写して書き換えてから fsdocs に渡す。
 // 書き換えるのは作業用の写しだけで、元のファイルには触れない。
+//
+// fsdocs はビルド結果の DLL を読むだけでビルドはしないので、先に fsdocs が見る既定の構成でプロジェクトをビルドする。
 
 open System.Diagnostics
 open System.IO
@@ -173,6 +175,14 @@ let common =
     @ [ "--parameters"; "fsdocs-collection-name"; "EffectSystem" ]
 
 prepareInput ()
+
+// ビルドに失敗したら、その終了コードで止める。
+projects
+|> List.tryPick (fun project ->
+    match run [ "build"; project ] with
+    | 0 -> None
+    | code -> Some code)
+|> Option.iter exit
 
 let watch = fsi.CommandLineArgs |> Array.contains "--watch"
 

@@ -37,7 +37,7 @@ dotnet run -c Release --project samples/EffectSystem.Samples -- limit direct-ctl
 
 ### ドキュメントの生成
 
-[fsdocs](https://fsprojects.github.io/FSharp.Formatting/commandline.html) で、XML コメントから API ドキュメントを生成します。この README と `docs/` の文書もサイトに含まれます。
+[fsdocs](https://fsprojects.github.io/FSharp.Formatting/commandline.html) で、XML コメントから API ドキュメントを生成します。この README と `docs/` の文書もサイトに含まれます。プロジェクトのビルドはスクリプトが行います。
 
 ```powershell
 dotnet tool restore
