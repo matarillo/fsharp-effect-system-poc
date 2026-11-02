@@ -1081,6 +1081,131 @@ let asyncOneShot =
               source.Cancel()
               Expect.equal result.Value 1 "" ]
 
+/// README の課題 8 が頼っている FSharp.Core の挙動。版を上げて変わったらここで分かる。
+let asyncBehaviour =
+    testList
+        "FSharp.Core の Async の挙動"
+        [ testCase "親が正常に終わっても StartChild の子は走り続ける"
+          <| fun () ->
+              use release = new ManualResetEventSlim(false)
+              use childFinished = new ManualResetEventSlim(false)
+
+              async {
+                  let! _ =
+                      Async.StartChild(
+                          async {
+                              let! _ = Async.AwaitWaitHandle release.WaitHandle
+                              childFinished.Set()
+                          }
+                      )
+
+                  return ()
+              }
+              |> Async.RunSynchronously
+
+              Expect.isFalse childFinished.IsSet "親の終了時点では子は終わっていない"
+              release.Set()
+              Expect.isTrue (childFinished.Wait 5000) "親の終了後に子が終わる"
+
+          testCase "親を中断すると StartChild の子も中断される"
+          <| fun () ->
+              use source = new CancellationTokenSource()
+              use started = new ManualResetEventSlim(false)
+              use childFinally = new ManualResetEventSlim(false)
+
+              let child =
+                  async {
+                      try
+                          started.Set()
+                          do! Async.Sleep 60_000
+                      finally
+                          childFinally.Set()
+                  }
+
+              Async.Start(
+                  async {
+                      let! wait = Async.StartChild child
+                      return! wait
+                  },
+                  source.Token
+              )
+
+              Expect.isTrue (started.Wait 5000) "子が動き出す"
+              source.Cancel()
+              Expect.isTrue (childFinally.Wait 5000) "子の finally が走る"
+
+          testCase "Async.Parallel は同時の失敗を 1 つしか残さない"
+          <| fun () ->
+              use both = new CountdownEvent(2)
+
+              let failing (name: string) : Async<unit> =
+                  async {
+                      both.Signal() |> ignore
+                      both.Wait 5000 |> ignore
+                      return failwith name
+                  }
+
+              let e =
+                  Expect.throwsC
+                      (fun () -> [ failing "A"; failing "B" ] |> Async.Parallel |> Async.RunSynchronously |> ignore)
+                      id
+
+              Expect.isFalse (e :? AggregateException) "失敗はまとめられない"
+              Expect.contains [ "A"; "B" ] e.Message "片方だけが残る"
+
+          testCase "finally の例外は本体の例外を消す"
+          <| fun () ->
+              let work: Async<unit> =
+                  async {
+                      try
+                          failwith "body"
+                      finally
+                          failwith "finalizer"
+                  }
+
+              let e = Expect.throwsC (fun () -> Async.RunSynchronously work) id
+              Expect.equal e.Message "finalizer" "後始末の例外だけが残る"
+              Expect.isNull e.InnerException "本体の例外は辿れない"
+
+          testCase "Async.Sleep で止まっている計算は Cancel で finally が走る"
+          <| fun () ->
+              use source = new CancellationTokenSource()
+              use started = new ManualResetEventSlim(false)
+              use finished = new ManualResetEventSlim(false)
+
+              let task =
+                  async {
+                      try
+                          started.Set()
+                          do! Async.Sleep 60_000
+                      finally
+                          finished.Set()
+                  }
+
+              Async.Start(task, source.Token)
+              Expect.isTrue (started.Wait 5000) "計算が動き出す"
+              source.Cancel()
+              Expect.isTrue (finished.Wait 5000) "finally が走る"
+
+          testCase "cancel を呼ばない FromContinuations は Cancel に応じない"
+          <| fun () ->
+              use source = new CancellationTokenSource()
+              use parked = new ManualResetEventSlim(false)
+              use finished = new ManualResetEventSlim(false)
+
+              let task =
+                  async {
+                      try
+                          do! Async.FromContinuations(fun _ -> parked.Set())
+                      finally
+                          finished.Set()
+                  }
+
+              Async.Start(task, source.Token)
+              Expect.isTrue (parked.Wait 5000) "計算が止まる"
+              source.Cancel()
+              Expect.isFalse (finished.Wait 200) "finally は走らない" ]
+
 open EffectSystem.Samples.ZioStyle
 
 let zioStyle =
@@ -1281,6 +1406,7 @@ let main argv =
           staticRow
           recordEnv
           asyncOneShot
+          asyncBehaviour
           zioStyle
           runEncoding
           fsharpPlusBehaviour
