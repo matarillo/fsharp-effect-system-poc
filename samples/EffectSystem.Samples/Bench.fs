@@ -158,6 +158,62 @@ let private capabilityRet (n: int) =
         0
     |> Eff.run
 
+/// <summary>Rio で n 回操作する計算。環境はインターフェイスで受ける。</summary>
+let rec private rioBody (remaining: int) (sum: int) : Rio<EffektStyle.IAsk<int>, int> =
+    rio {
+        if remaining = 0 then
+            return sum
+        else
+            let! v = EffektStyle.ask ()
+            return! rioBody (remaining - 1) (sum + v)
+    }
+
+/// <summary>Rio を、継続を取り出す能力で測る。</summary>
+let private rioShift (n: int) =
+    reset (fun prompt ->
+        rioBody n 0
+        |> Rio.run
+            { new EffektStyle.IAsk<int> with
+                member _.Ask() = shift prompt (fun resume -> resume 1) })
+    |> Eff.run
+
+/// <summary>Rio を、継続を取り出さずに答える能力で測る。</summary>
+let private rioRet (n: int) =
+    rioBody n 0
+    |> Rio.run
+        { new EffektStyle.IAsk<int> with
+            member _.Ask() = Eff.ret 1 }
+    |> Eff.run
+
+/// <summary>レコードの環境で n 回操作する計算。環境は匿名レコードで閉じる。</summary>
+let rec private recordBody (remaining: int) (sum: int) : Rio<{| Ask: EffektStyle.IAsk<int> |}, int> =
+    rio {
+        if remaining = 0 then
+            return sum
+        else
+            let! v = RecordEnv.ask ()
+            return! recordBody (remaining - 1) (sum + v)
+    }
+
+/// <summary>レコードの環境を、継続を取り出す能力で測る。</summary>
+let private recordShift (n: int) =
+    reset (fun prompt ->
+        recordBody n 0
+        |> Rio.run
+            {| Ask =
+                { new EffektStyle.IAsk<int> with
+                    member _.Ask() = shift prompt (fun resume -> resume 1) } |})
+    |> Eff.run
+
+/// <summary>レコードの環境を、継続を取り出さずに答える能力で測る。</summary>
+let private recordRet (n: int) =
+    recordBody n 0
+    |> Rio.run
+        {| Ask =
+            { new EffektStyle.IAsk<int> with
+                member _.Ask() = Eff.ret 1 } |}
+    |> Eff.run
+
 /// <summary><c>Async.FromContinuations</c> を測る。コールバックの中で同期的に再開する、最も速い経路である。</summary>
 let private asyncOneShot (n: int) =
     let body =
@@ -209,6 +265,10 @@ let run () =
     measure "Freer + ctl" 2_000_000 freerCtl
     measure "Capability (reset/shift)" 2_000_000 capability
     measure "Capability (Eff.ret)" 2_000_000 capabilityRet
+    measure "Rio (reset/shift)" 2_000_000 rioShift
+    measure "Rio (Eff.ret)" 2_000_000 rioRet
+    measure "RecordEnv (reset/shift)" 2_000_000 recordShift
+    measure "RecordEnv (Eff.ret)" 2_000_000 recordRet
     measure "FSharpPlus Free (Free.run)" 1_000_000 fsharpPlusFree
     measure "Async.FromContinuations" 2_000_000 asyncOneShot
     measure "Direct + fn (thread handoff)" 100_000 directFn

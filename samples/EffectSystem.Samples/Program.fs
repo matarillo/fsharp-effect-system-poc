@@ -57,6 +57,11 @@ let private showAll () =
 
     section "静的な行: askEmit" StaticRow.exampleAskEmit
 
+    section "レコードの環境: askEmit" RecordEnv.exampleAskEmit
+    section "レコードの環境: 名前付きレコードで閉じる" RecordEnv.exampleClosedEnv
+    section "レコードの環境: ラベルで分ける" (fun out -> out (string (RecordEnv.exampleTwoLabels ())))
+    section "レコードの環境: 能力の引数をまとめる" RecordEnv.exampleActivePattern
+
     section "State × NonDet" (fun out ->
         out $"State が内側: %A{Advanced.stateInsideNonDet ()}"
         out $"State が外側: %A{Advanced.stateOutsideNonDet ()}")

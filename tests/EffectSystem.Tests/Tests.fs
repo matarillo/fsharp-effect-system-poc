@@ -659,6 +659,64 @@ let staticRow =
           testCase "使わない側のスロットは多相のまま"
           <| fun () -> Expect.equal (StaticRow.exampleAskOnly ()) 4 "" ]
 
+let recordEnv =
+    testList
+        "レコードの環境"
+        [ testCase "匿名レコードを環境にする"
+          <| fun () -> Expect.equal (capture RecordEnv.exampleAskEmit) startEmitEnd ""
+
+          testCase "余分なフィールドがあってもよい"
+          <| fun () ->
+              let lines =
+                  capture (fun out ->
+                      handlers {
+                          let! ask = EffektStyle.askHandler "Ask Value"
+                          let! emit = EffektStyle.emitHandler out
+                          return! RecordEnv.askEmit out |> Rio.run {| Ask = ask; Emit = emit; Extra = 1 |}
+                      }
+                      |> Eff.run)
+
+              Expect.equal lines startEmitEnd ""
+
+          testCase "名前付きレコードで行を閉じる"
+          <| fun () -> Expect.equal (capture RecordEnv.exampleClosedEnv) [ "Emit Ask Value"; "Emit Ask Value" ] ""
+
+          testCase "同じインターフェイスの別のインスタンスをラベルで分ける"
+          <| fun () -> Expect.equal (RecordEnv.exampleTwoLabels ()) (30, "Alice") ""
+
+          testCase "アクティブパターンで能力の引数をまとめる"
+          <| fun () -> Expect.equal (capture RecordEnv.exampleActivePattern) startEmitEnd ""
+
+          testCase "両方を 2 回再開すると記事の Effekt と同じ出力になる"
+          <| fun () ->
+              let lines =
+                  capture (fun out ->
+                      handlers {
+                          let! ask = EffektStyle.askHandlerTwice "Ask Value"
+                          let! emit = EffektStyle.emitHandlerTwice out
+                          return! RecordEnv.askEmit out |> Rio.run {| Ask = ask; Emit = emit |}
+                      }
+                      |> Eff.run)
+
+              Expect.equal lines (capture EffektStyle.exampleBothTwice) ""
+
+          testCase "閉じた環境の末尾の do! の再帰はスタックを伸ばさない"
+          <| fun () ->
+              let mutable count = 0
+
+              let env: RecordEnv.AppEnv =
+                  { Ask =
+                      { new EffektStyle.IAsk<string> with
+                          member _.Ask() = Eff.ret "x" }
+                    Emit =
+                      { new EffektStyle.IEmit<string> with
+                          member _.Emit _ =
+                              count <- count + 1
+                              Eff.ret () } }
+
+              RecordEnv.repeatAskEmit 1_000_000 |> Rio.run env |> Eff.run
+              Expect.equal count 1_000_000 "" ]
+
 let asyncOneShot =
     testList
         "Async one-shot"
@@ -802,7 +860,20 @@ let staticSafety =
           shouldCompile "rio-all-provided.fsx"
           shouldReject "rio-missing-emit.fsx" "FS0193" "IEmit"
           shouldReject "rio-two-instantiations.fsx" "FS0001" "int"
-          shouldCompile "rio-distinct-interfaces.fsx" ]
+          shouldCompile "rio-distinct-interfaces.fsx"
+          shouldCompile "record-all-provided.fsx"
+          shouldReject "record-missing-emit.fsx" "FS0001" "get_Emit"
+          shouldCompile "record-two-labels.fsx"
+          shouldReject "record-same-label.fsx" "FS0001" "int"
+          shouldReject "record-no-inline.fsx" "FS0001" "Extra"
+          shouldCompile "record-local-rec.fsx"
+          shouldReject "record-rec-inline.fsx" "FS3890" "loop"
+          shouldCompile "record-concrete-extend.fsx"
+          shouldReject "record-generic-extend.fsx" "FS3245" "copy-and-update"
+          shouldCompile "rio-abstract-member.fsx"
+          shouldReject "record-abstract-member.fsx" "FS0670" "^R"
+          shouldReject "record-extension-member.fsx" "FS0193" "get_Ask"
+          shouldReject "record-rank2.fsx" "FS0001" "Extra" ]
 
 [<EntryPoint>]
 let main argv =
@@ -814,6 +885,7 @@ let main argv =
           freerSemantics
           capabilitySemantics
           staticRow
+          recordEnv
           asyncOneShot
           runEncoding
           fsharpPlusBehaviour

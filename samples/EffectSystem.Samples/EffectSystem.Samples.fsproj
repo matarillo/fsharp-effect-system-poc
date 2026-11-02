@@ -17,6 +17,7 @@
     <Compile Include="OCamlManual.fs" />
     <Compile Include="AsyncOneShot.fs" />
     <Compile Include="StaticRow.fs" />
+    <Compile Include="RecordEnv.fs" />
     <Compile Include="Advanced.fs" />
     <Compile Include="Bench.fs" />
     <Compile Include="Program.fs" />
